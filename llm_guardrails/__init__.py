@@ -1,4 +1,8 @@
-"""LLM Guardrails -- Responsible AI toolkit for LLM applications."""
+"""LLM Guardrails -- Responsible AI toolkit for LLM applications.
+
+Core guardrail logic is implemented in Rust (via PyO3) for performance.
+Python wrappers expose the same API as the original pure-Python version.
+"""
 
 from llm_guardrails.bias_scorer import BiasScorer
 from llm_guardrails.injection_detector import InjectionDetector

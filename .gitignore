@@ -36,6 +36,12 @@ coverage.xml
 # ruff
 .ruff_cache/
 
+# Rust
+target/
+*.so
+*.dylib
+*.pyd
+
 # OS
 .DS_Store
 Thumbs.db

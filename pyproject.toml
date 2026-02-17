@@ -1,18 +1,18 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "llm_guardrails"
-version = "0.1.0"
-description = "Responsible AI toolkit for LLM applications -- PII redaction, prompt injection detection, bias scoring, and output validation."
+version = "0.2.0"
+description = "Responsible AI toolkit for LLM applications -- Rust-powered PII redaction, prompt injection detection, bias scoring, and output validation with Python bindings."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 authors = [
     { name = "Melroy Anthony" },
 ]
-keywords = ["llm", "guardrails", "responsible-ai", "pii", "gdpr", "safety"]
+keywords = ["llm", "guardrails", "responsible-ai", "pii", "gdpr", "safety", "rust", "pyo3"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Security",
 ]
@@ -41,13 +42,17 @@ dev = [
 [project.urls]
 Repository = "https://github.com/melroyanthony/llm-guardrails"
 
+[tool.maturin]
+module-name = "llm_guardrails._core"
+features = ["pyo3/extension-module"]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "S", "B", "A", "C4", "SIM"]
-ignore = ["S101"]  # allow assert in tests
+ignore = ["S101"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

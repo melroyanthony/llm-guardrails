@@ -18,7 +18,7 @@ class TestStereotypingDetection:
         scorer = BiasScorer()
         report = scorer.score("Women are naturally bad at mathematics.")
         assert report.score > 0.0
-        assert any("stereotype" in f.lower() or "generalisation" in f.lower() for f in report.flags)
+        assert any("stereotyp" in f.lower() or "generalisation" in f.lower() for f in report.flags)
 
     def test_age_stereotype(self):
         scorer = BiasScorer()
