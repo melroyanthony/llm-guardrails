@@ -32,10 +32,10 @@ from llm_guardrails.output_validator import (
 )
 from llm_guardrails.pii_redactor import PIIRedactor
 
-
 # ---------------------------------------------------------------------------
 # Result containers
 # ---------------------------------------------------------------------------
+
 
 class PreProcessResult(BaseModel):
     """Outcome of pre-processing (input guardrails)."""
@@ -70,6 +70,7 @@ class PostProcessResult(BaseModel):
 # Pipeline
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GuardrailsPipeline:
     """Configurable chain of Responsible-AI guardrails.
@@ -100,13 +101,9 @@ class GuardrailsPipeline:
 
     # Guards (lazily initialised for convenience)
     _pii: PIIRedactor = field(default_factory=PIIRedactor, init=False, repr=False)
-    _injection: InjectionDetector = field(
-        default_factory=InjectionDetector, init=False, repr=False
-    )
+    _injection: InjectionDetector = field(default_factory=InjectionDetector, init=False, repr=False)
     _bias: BiasScorer = field(default_factory=BiasScorer, init=False, repr=False)
-    _validator: OutputValidator = field(
-        default_factory=OutputValidator, init=False, repr=False
-    )
+    _validator: OutputValidator = field(default_factory=OutputValidator, init=False, repr=False)
 
     # ------------------------------------------------------------------
     # Pre-processing (input guardrails)
@@ -165,10 +162,7 @@ class GuardrailsPipeline:
             validation = ValidationResult(is_valid=True)
 
         # 2. Bias scoring
-        if self.bias_enabled:
-            bias = self._bias.score(text)
-        else:
-            bias = BiasReport(score=0.0, flags=[])
+        bias = self._bias.score(text) if self.bias_enabled else BiasReport(score=0.0, flags=[])
 
         # 3. PII restoration
         if self.pii_enabled and pii_mapping:

@@ -14,9 +14,7 @@ class TestPreProcessing:
 
     def test_pii_is_redacted(self):
         pipeline = GuardrailsPipeline()
-        result = pipeline.pre_process(
-            "My email is alice@example.com and SSN is 123-45-6789."
-        )
+        result = pipeline.pre_process("My email is alice@example.com and SSN is 123-45-6789.")
 
         assert "alice@example.com" not in result.sanitised_text
         assert "123-45-6789" not in result.sanitised_text
@@ -59,9 +57,7 @@ class TestFullRoundTrip:
         pipeline = GuardrailsPipeline()
 
         # Pre-process
-        pre = pipeline.pre_process(
-            "My email is alice@example.com. What is 2 + 2?"
-        )
+        pre = pipeline.pre_process("My email is alice@example.com. What is 2 + 2?")
         assert pre.blocked is False
         assert "alice@example.com" not in pre.sanitised_text
 

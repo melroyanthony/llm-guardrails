@@ -151,9 +151,8 @@ mod tests {
     fn test_gender_stereotype() {
         let (score, flags) = bias_score("Women are naturally bad at mathematics.");
         assert!(score > 0.0);
-        assert!(flags
-            .iter()
-            .any(|f| f.to_lowercase().contains("stereotyp") || f.to_lowercase().contains("generalisation")));
+        assert!(flags.iter().any(|f| f.to_lowercase().contains("stereotyp")
+            || f.to_lowercase().contains("generalisation")));
     }
 
     #[test]

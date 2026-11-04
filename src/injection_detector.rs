@@ -84,10 +84,7 @@ static RULES: Lazy<Vec<InjectionRule>> = Lazy::new(|| {
 const MULTI_MATCH_BONUS: f64 = 0.10;
 
 fn compute_score_and_matches(text: &str) -> (f64, Vec<&'static str>) {
-    let matched: Vec<&InjectionRule> = RULES
-        .iter()
-        .filter(|r| r.pattern.is_match(text))
-        .collect();
+    let matched: Vec<&InjectionRule> = RULES.iter().filter(|r| r.pattern.is_match(text)).collect();
 
     if matched.is_empty() {
         return (0.0, Vec::new());
