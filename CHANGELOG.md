@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.2.1](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.1) (2026-11-04)
+
+### Chores
+
+* chore(conf): roll out sdlc conf
+
 ## [0.2.0](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.0) (2026-02-17)
 
 ### Added
