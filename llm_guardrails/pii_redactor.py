@@ -16,6 +16,13 @@ class PIIRedactor:
     such as ``<<EMAIL_1>>`` and returns a mapping that allows exact
     restoration later.
 
+    ``allow_entities`` limits detection to those labels. ``deny_entities``
+    skips those labels. A denied label wins when it is also allowed.
+    Card numbers must pass the Luhn check. An SSN whose area is ``000``,
+    ``666``, or ``9xx``, whose group is ``00``, or whose serial is ``0000``
+    is left alone. A name or date of birth is redacted only when a context
+    word such as ``name`` or ``born`` / ``DOB`` sits next to it.
+
     Example
     -------
     >>> redactor = PIIRedactor()
@@ -25,6 +32,14 @@ class PIIRedactor:
     >>> redactor.restore(redacted, mapping)
     'Call me at 555-123-4567'
     """
+
+    def __init__(
+        self,
+        allow_entities: list[str] | None = None,
+        deny_entities: list[str] | None = None,
+    ) -> None:
+        self.allow_entities = allow_entities
+        self.deny_entities = deny_entities
 
     def redact(self, text: str) -> tuple[str, dict[str, str]]:
         """Replace PII tokens with placeholders.
@@ -38,7 +53,7 @@ class PIIRedactor:
             ``{placeholder: original_value}`` -- pass this to ``restore``
             to recover the original text.
         """
-        return pii_redact(text)
+        return pii_redact(text, self.allow_entities, self.deny_entities)
 
     @staticmethod
     def restore(text: str, mapping: dict[str, str]) -> str:

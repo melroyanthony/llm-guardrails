@@ -89,6 +89,10 @@ class GuardrailsPipeline:
         Score threshold for blocking input.
     validation_rules : ValidationRules | None
         Rules passed to the :class:`OutputValidator`.
+    pii_allow_entities : list[str] | None
+        When set, only these PII labels are redacted.
+    pii_deny_entities : list[str] | None
+        PII labels that are never redacted.
     """
 
     pii_enabled: bool = True
@@ -98,12 +102,20 @@ class GuardrailsPipeline:
 
     injection_threshold: float = 0.5
     validation_rules: ValidationRules | None = None
+    pii_allow_entities: list[str] | None = None
+    pii_deny_entities: list[str] | None = None
 
     # Guards (lazily initialised for convenience)
-    _pii: PIIRedactor = field(default_factory=PIIRedactor, init=False, repr=False)
+    _pii: PIIRedactor = field(init=False, repr=False)
     _injection: InjectionDetector = field(default_factory=InjectionDetector, init=False, repr=False)
     _bias: BiasScorer = field(default_factory=BiasScorer, init=False, repr=False)
     _validator: OutputValidator = field(default_factory=OutputValidator, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._pii = PIIRedactor(
+            allow_entities=self.pii_allow_entities,
+            deny_entities=self.pii_deny_entities,
+        )
 
     # ------------------------------------------------------------------
     # Pre-processing (input guardrails)

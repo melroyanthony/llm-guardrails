@@ -91,3 +91,76 @@ class TestRoundTrip:
 
         assert redacted == text
         assert mapping == {}
+
+
+class TestFalsePositives:
+    def test_credit_card_rejects_failed_luhn(self):
+        redactor = PIIRedactor()
+        text = "Order 1234-5678-9012-3456 is ready."
+        redacted, mapping = redactor.redact(text)
+
+        assert redacted == text
+        assert not any("CREDIT_CARD" in key for key in mapping)
+
+        plain = "Ref 1234567890123456."
+        redacted, mapping = redactor.redact(plain)
+        assert "<<CREDIT_CARD_" not in redacted
+        assert not any("CREDIT_CARD" in key for key in mapping)
+
+    def test_ssn_rejects_invalid_ranges(self):
+        redactor = PIIRedactor()
+        for text in (
+            "SSN 000-12-3456",
+            "SSN 666-12-3456",
+            "SSN 900-12-3456",
+            "SSN 123-00-6789",
+            "SSN 123-45-0000",
+        ):
+            redacted, mapping = redactor.redact(text)
+            assert redacted == text
+            assert not any("SSN" in key for key in mapping)
+
+    def test_name_ignores_place_and_greeting(self):
+        redactor = PIIRedactor()
+        for text in ("I live in New York.", "Hello World is a sample."):
+            redacted, mapping = redactor.redact(text)
+            assert redacted == text
+            assert not any("NAME" in key for key in mapping)
+
+    def test_name_with_context_is_redacted(self):
+        redactor = PIIRedactor()
+        redacted, mapping = redactor.redact("My name is Jane Doe.")
+
+        assert "Jane Doe" not in redacted
+        assert mapping["<<NAME_1>>"] == "Jane Doe"
+
+    def test_dob_without_context_is_kept(self):
+        redactor = PIIRedactor()
+        text = "The meeting is on 04/15/1990."
+        redacted, mapping = redactor.redact(text)
+
+        assert redacted == text
+        assert not any("DATE_OF_BIRTH" in key for key in mapping)
+
+    def test_dob_with_context_is_redacted(self):
+        redactor = PIIRedactor()
+        redacted, mapping = redactor.redact("Born on 04/15/1990.")
+
+        assert "04/15/1990" not in redacted
+        assert mapping["<<DATE_OF_BIRTH_1>>"] == "04/15/1990"
+
+    def test_allow_entities_limits_detection(self):
+        redactor = PIIRedactor(allow_entities=["EMAIL"])
+        redacted, mapping = redactor.redact("Email alice@example.com, SSN 123-45-6789.")
+
+        assert "alice@example.com" not in redacted
+        assert "123-45-6789" in redacted
+        assert set(mapping) == {"<<EMAIL_1>>"}
+
+    def test_deny_entities_skips_a_label(self):
+        redactor = PIIRedactor(deny_entities=["EMAIL"])
+        text = "Email alice@example.com today."
+        redacted, mapping = redactor.redact(text)
+
+        assert redacted == text
+        assert mapping == {}
