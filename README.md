@@ -81,6 +81,9 @@ python3 scripts/release_publish.py --self-test
 
 `uv sync` builds the extension. pytest needs that build because the wrappers import
 `llm_guardrails._core`. `cargo test` runs the Rust tests without Python.
+With [just](https://just.systems/) installed, `just setup` syncs the lockfile and
+runs `maturin develop`, and `just ci` runs the checks above plus
+`python3 scripts/test_guardrails.py`.
 
 Two places to change when a guard's behaviour changes:
 
@@ -216,6 +219,12 @@ sequenceDiagram
     Pipeline->>Rust: pii_restore
     Pipeline-->>Caller: PostProcessResult
 ```
+
+## 🤝 Contributing
+
+- 🛠️ [CONTRIBUTING.md](CONTRIBUTING.md) — setup, tests, lint, and pull requests
+- 🔒 [SECURITY.md](SECURITY.md) — private vulnerability reports
+- 📖 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — Contributor Covenant 2.1
 
 ## 📄 License
 

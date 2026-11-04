@@ -1,0 +1,55 @@
+name: Bug report
+description: A defect in the library, the FastAPI demo, or the build
+title: "🐛 fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Search the open issues first.
+        For a vulnerability, use private reporting instead of this form:
+        https://github.com/melroyanthony/llm-guardrails/security/advisories/new
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands, input text, and what you observed.
+      placeholder: |
+        1. just setup
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Package version, tag, or commit.
+      placeholder: "0.2.4"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Python library
+        - Rust core
+        - FastAPI demo
+        - Build or CI
+        - Docs
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python, and Rust toolchain, if you know them.
+    validations:
+      required: false

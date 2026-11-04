@@ -1,0 +1,32 @@
+name: Feature request
+description: A change to the library, the demo, or the developer workflow
+title: "✨ feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem you want solved. For a vulnerability, use private
+        reporting instead of this form:
+        https://github.com/melroyanthony/llm-guardrails/security/advisories/new
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is difficult or missing today, and who hits it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should change, and how would you use it?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other approaches you considered.
+    validations:
+      required: false
