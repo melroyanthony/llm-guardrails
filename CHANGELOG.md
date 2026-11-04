@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Breaking changes
+
+* `/guard/input` no longer returns the PII mapping. It returns an opaque `pii_mapping_id`, and the server keeps the map for 15 minutes. `/guard/output` takes that id and rejects a client-supplied mapping. Request `text` is limited to 8000 characters (422). Request bodies over 32768 bytes are rejected with 413.
+
+### Bug Fixes
+
+* `GET /health` reports the installed `llm_guardrails` version from package metadata instead of a hard-coded 0.1.0. The demo builds `GuardrailsPipeline` on first use, not at import. `python-dotenv` is no longer a core dependency.
+
 ## [0.2.7](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.7) (2026-11-04)
 
 ### Bug Fixes
