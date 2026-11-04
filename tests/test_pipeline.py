@@ -71,6 +71,13 @@ class TestFullRoundTrip:
 
 
 class TestDisabledGuards:
+    def test_pii_deny_entities(self):
+        pipeline = GuardrailsPipeline(pii_deny_entities=["EMAIL"])
+        result = pipeline.pre_process("Email alice@example.com")
+
+        assert "alice@example.com" in result.sanitised_text
+        assert result.pii_mapping == {}
+
     def test_pii_disabled(self):
         pipeline = GuardrailsPipeline(pii_enabled=False)
         result = pipeline.pre_process("Email: alice@example.com")
