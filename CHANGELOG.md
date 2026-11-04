@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.3.0](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.0) (2026-11-04)
+
 ### Breaking changes
 
 * `PIIRedactor.allow_entities` and `deny_entities` are read-only. Assigning either one after construction raises `AttributeError`. Each value is a tuple, or `None`, and cannot be changed in place. Pass the labels to the constructor.
