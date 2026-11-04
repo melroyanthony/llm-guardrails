@@ -118,7 +118,7 @@ fn check_json(text: &str, schema_str: &str) -> Vec<Issue> {
 /// is a Python list of dicts with keys: rule, message, severity.
 #[pyfunction]
 #[pyo3(signature = (text, json_schema=None, max_length=None, check_hallucination=true, hallucination_threshold=0.6, required_keywords=None, blocked_keywords=None))]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // signature mirrors the Python API
 pub fn output_validate(
     py: Python<'_>,
     text: &str,

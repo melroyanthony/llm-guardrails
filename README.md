@@ -36,7 +36,7 @@ uv run uvicorn api.main:app --reload
 | 📄 OpenAPI document | http://localhost:8000/openapi.json |
 
 `GET /health` returns `{"status":"ok","version":"0.1.0"}`. That version string is hard-coded
-in `api/main.py`. The package version in `pyproject.toml` is `0.2.0`.
+in `api/main.py`. The package version comes from `Cargo.toml` and is `0.2.0`.
 
 Guard text from Python:
 

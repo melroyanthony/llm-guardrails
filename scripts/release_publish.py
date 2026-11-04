@@ -15,8 +15,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -119,6 +121,51 @@ def _changes(decision: dict) -> list[dict[str, str]]:
     return [{"section": decision["section"], "subject": decision["subject"]}]
 
 
+def _set_cargo_package_version(text: str, version: str) -> str:
+    """Replace the ``[package]`` version and leave dependency versions alone."""
+    updated, count = re.subn(
+        r'(?m)^version = "[^"]+"',
+        f'version = "{version}"',
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit("Cargo.toml has no package version")
+    return updated
+
+
+def _set_lock_package_version(text: str, package: str, version: str) -> str:
+    """Replace one lockfile package's version line, matched by name."""
+    pattern = re.compile(rf'(name = "{re.escape(package)}"\nversion = ")[^"]+(")')
+    updated, count = pattern.subn(rf"\g<1>{version}\2", text, count=1)
+    if count != 1:
+        raise SystemExit(f"{package} version was not found in the lockfile")
+    return updated
+
+
+def write_package_versions(root: Path, version: str) -> None:
+    """Keep Cargo.toml and the root Cargo.lock entry aligned with ``version``.
+
+    ``pyproject.toml`` declares ``dynamic = ["version"]``. Maturin reads the
+    version from Cargo.toml, so that file is the only package version.
+    """
+    cargo = root / "Cargo.toml"
+    cargo.write_text(
+        _set_cargo_package_version(cargo.read_text(encoding="utf-8"), version),
+        encoding="utf-8",
+    )
+    lock = root / "Cargo.lock"
+    if lock.is_file():
+        lock.write_text(
+            _set_lock_package_version(
+                lock.read_text(encoding="utf-8"),
+                "llm-guardrails-core",
+                version,
+            ),
+            encoding="utf-8",
+        )
+
+
 def _write_release_files(decision: dict) -> bool:
     version = decision["version"] + "\n"
     changelog = prepend_changes(
@@ -129,8 +176,15 @@ def _write_release_files(decision: dict) -> bool:
     )
     changed = VERSION_PATH.read_text(encoding="utf-8") != version
     changed = changed or CHANGELOG_PATH.read_text(encoding="utf-8") != changelog
+    cargo_before = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    lock_path = ROOT / "Cargo.lock"
+    lock_before = lock_path.read_text(encoding="utf-8") if lock_path.is_file() else ""
     VERSION_PATH.write_text(version, encoding="utf-8")
     CHANGELOG_PATH.write_text(changelog, encoding="utf-8")
+    write_package_versions(ROOT, decision["version"])
+    changed = changed or (ROOT / "Cargo.toml").read_text(encoding="utf-8") != cargo_before
+    if lock_path.is_file():
+        changed = changed or lock_path.read_text(encoding="utf-8") != lock_before
     return changed
 
 
@@ -140,7 +194,10 @@ def _commit_release(decision: dict) -> bool:
         return False
     if not _write_release_files(decision):
         return False
-    _run(["git", "add", ".version", "CHANGELOG.md"], dry_run=False)
+    _run(
+        ["git", "add", ".version", "CHANGELOG.md", "Cargo.toml", "Cargo.lock"],
+        dry_run=False,
+    )
     _run(
         ["git", "commit", "-m", decision["commit_subject"]],
         dry_run=False,
@@ -292,7 +349,60 @@ def self_test() -> None:
         pass
     else:
         raise SystemExit("publish accepted a skip decision")
+    _check_versions_match_after_bump()
     print("release_publish.py self-test ok")
+
+
+def _check_versions_match_after_bump() -> None:
+    """Cargo.toml, Cargo.lock, and .version share one version after a bump."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "Cargo.toml").write_text(
+            "\n".join(
+                [
+                    "[package]",
+                    'name = "llm-guardrails-core"',
+                    'version = "0.2.0"',
+                    "",
+                    "[dependencies]",
+                    'pyo3 = { version = "0.29", features = ["extension-module"] }',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (root / "Cargo.lock").write_text(
+            "\n".join(
+                [
+                    "[[package]]",
+                    'name = "pyo3"',
+                    'version = "0.29.3"',
+                    "",
+                    "[[package]]",
+                    'name = "llm-guardrails-core"',
+                    'version = "0.2.0"',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (root / ".version").write_text("0.2.0\n", encoding="utf-8")
+        write_package_versions(root, "0.2.1")
+        (root / ".version").write_text("0.2.1\n", encoding="utf-8")
+        cargo = (root / "Cargo.toml").read_text(encoding="utf-8")
+        lock = (root / "Cargo.lock").read_text(encoding="utf-8")
+        recorded = (root / ".version").read_text(encoding="utf-8").strip()
+        if 'version = "0.2.1"' not in cargo.split("[dependencies]", 1)[0]:
+            raise SystemExit(f"Cargo.toml package version was not bumped:\n{cargo}")
+        if 'pyo3 = { version = "0.29"' not in cargo:
+            raise SystemExit("dependency version was rewritten")
+        core = lock.split('name = "llm-guardrails-core"', 1)[1]
+        if 'version = "0.2.1"' not in core:
+            raise SystemExit(f"Cargo.lock root package was not bumped:\n{lock}")
+        if 'name = "pyo3"\nversion = "0.29.3"' not in lock:
+            raise SystemExit("Cargo.lock rewrote a dependency version")
+        if recorded != "0.2.1":
+            raise SystemExit(f".version is {recorded}, not 0.2.1")
 
 
 def main(argv: list[str] | None = None) -> int:

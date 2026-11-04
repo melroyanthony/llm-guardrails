@@ -863,6 +863,25 @@ def _check_rerun_keeps_released_body_and_new_notes() -> None:
         _fail(f"new note was copied into the released section:\n{rendered}")
 
 
+def _check_since_tag_fails_closed_without_a_tag() -> None:
+    """No tag plus a shipped .version must not scan the whole history."""
+    with tempfile.TemporaryDirectory() as raw:
+        cwd = Path(raw)
+        _git(cwd, "init", "-b", "main")
+        _git(cwd, "commit", "--allow-empty", "-m", "✨ feat(core): scaffold the library")
+        try:
+            classify_tip("0.2.0", "HEAD", cwd)
+        except SystemExit as exc:
+            text = str(exc)
+            if "0.2.0" not in text or "0.0.0" not in text or "tag" not in text.lower():
+                _fail(f"fail-closed message was unclear: {text}")
+        else:
+            _fail("--since-tag classified history when no v* tag exists")
+        allowed = classify_tip("0.0.0", "HEAD", cwd)
+        _expect(allowed["action"], "publish", "0.0.0 with no tag still classifies")
+        _expect(allowed["version"], "0.1.0", "0.0.0 with no tag bumps from zero")
+
+
 def self_test() -> None:
     """Run the classifier contract and the workflow safety checks."""
     _check_types_match_commitlint()
@@ -871,6 +890,7 @@ def self_test() -> None:
     _check_decisions()
     _check_changelog()
     _check_a_commit_landed_before_tagging_is_listed()
+    _check_since_tag_fails_closed_without_a_tag()
     print("release_subject.py self-test ok")
 
 
@@ -908,9 +928,22 @@ def commit_messages_since(tag: str | None, rev: str = "HEAD", cwd: Path | None =
 
 
 def classify_tip(version: str, rev: str = "HEAD", cwd: Path | None = None) -> dict:
-    """Decide the release for ``last tag..rev`` and record that tip."""
+    """Decide the release for ``last tag..rev`` and record that tip.
+
+    With no ``vX.Y.Z`` tag, every reachable commit would look unreleased.
+    That is allowed only when ``.version`` is still ``0.0.0``. Any other
+    version fails closed so a first publish cannot recount history that
+    already shipped.
+    """
     root = cwd or ROOT
-    decision = decide_unreleased(commit_messages_since(latest_version_tag(root), rev, root), version)
+    current = version.strip()
+    tag = latest_version_tag(root)
+    if tag is None and current != "0.0.0":
+        _fail(
+            "no vX.Y.Z tag exists and .version is "
+            f"{current}, not 0.0.0; refusing to treat every commit as unreleased"
+        )
+    decision = decide_unreleased(commit_messages_since(tag, rev, root), current)
     tip = subprocess.check_output(["git", "rev-parse", rev], cwd=root, text=True).strip()
     decision["tip"] = tip
     return decision
