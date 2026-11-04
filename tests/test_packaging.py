@@ -25,11 +25,29 @@ def test_release_publishes_inside_release_yml():
     _, _, after_pypi = jobs.partition("\n  pypi:")
     pypi, _, sbom = after_pypi.partition("\n  sbom:")
     assert "environment: pypi" in pypi
-    assert "id-token: write" in pypi
     assert "attestations: true" in pypi
     assert "attestations: write" not in pypi
     assert "contents: write" not in pypi
-    assert "actions: read" in pypi
+    perm_block = pypi.split("permissions:", 1)[1].split("steps:", 1)[0]
+    perm_lines = [
+        line.strip()
+        for line in perm_block.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert perm_lines == ["id-token: write", "actions: read"]
+    assert pypi.index("- name: Collect distributions") < pypi.index("- name: Publish to PyPI")
+    for tag in (
+        "cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "-cp311-abi3-win_amd64.whl",
+        "_x86_64.whl",
+        "_arm64.whl",
+    ):
+        assert tag in pypi.split("- name: Collect distributions", 1)[1].split(
+            "- name: Publish to PyPI", 1
+        )[0]
+    assert "len(wheels) != 5" in pypi
+    assert "exactly one sdist" in pypi
     assert "needs: pypi" in sbom
     assert "contents: write" in sbom
     assert "anchore/sbom-action@" in sbom

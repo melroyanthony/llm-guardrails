@@ -172,6 +172,67 @@ jobs:
           name: sdist
           path: dist
 
+      - name: Collect distributions
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          dist = Path("dist")
+          wheels = sorted(path.name for path in dist.glob("*.whl"))
+          sdists = sorted(path.name for path in dist.glob("*.tar.gz"))
+          print("wheels:")
+          print("\n".join(wheels) or "(none)")
+          print("sdists:")
+          print("\n".join(sdists) or "(none)")
+
+
+          def one_ending(suffix: str, label: str) -> str:
+              matched = [
+                  name
+                  for name in wheels
+                  if name.startswith("ferroguard-") and name.endswith(suffix)
+              ]
+              if len(matched) != 1:
+                  raise SystemExit(f"expected exactly one {label} wheel, found {matched}")
+              return matched[0]
+
+
+          # aarch64 uses the same manylinux: auto image as x86_64, so the same tags.
+          linux_x64 = one_ending(
+              "cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+              "linux x86_64",
+          )
+          linux_arm = one_ending(
+              "cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+              "linux aarch64",
+          )
+          mac_x64_names = [
+              name
+              for name in wheels
+              if "-cp311-abi3-macosx_" in name and name.endswith("_x86_64.whl")
+          ]
+          mac_arm_names = [
+              name
+              for name in wheels
+              if "-cp311-abi3-macosx_" in name and name.endswith("_arm64.whl")
+          ]
+          windows = one_ending("-cp311-abi3-win_amd64.whl", "Windows amd64")
+          if len(mac_x64_names) != 1:
+              raise SystemExit(f"expected exactly one macOS x86_64 wheel, found {mac_x64_names}")
+          if len(mac_arm_names) != 1:
+              raise SystemExit(f"expected exactly one macOS arm64 wheel, found {mac_arm_names}")
+          found = {linux_x64, linux_arm, mac_x64_names[0], mac_arm_names[0], windows}
+          if len(wheels) != 5 or found != set(wheels):
+              raise SystemExit(f"expected exactly these 5 wheels, found {wheels}")
+          if (
+              len(sdists) != 1
+              or not sdists[0].startswith("ferroguard-")
+              or not sdists[0].endswith(".tar.gz")
+          ):
+              raise SystemExit(f"expected exactly one sdist, found {sdists}")
+          PY
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
