@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.2.6](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.6) (2026-11-04)
+
 ### Bug Fixes
 
 * NAME and DATE_OF_BIRTH are redacted only next to a context word such as "name", "born", "DOB", "Dr.", or "Ms.". The default redacts less: "Jane Doe called" is no longer redacted. There is no option that restores the old behaviour of matching every title-case pair or every date.
