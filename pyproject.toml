@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin>=1.16.0,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -34,7 +34,7 @@ dependencies = [
 [project.optional-dependencies]
 api = [
     "fastapi>=0.110,<1.0",
-    "uvicorn[standard]>=0.29,<1.0",
+    "uvicorn[standard]>=0.54.0,<1.0",
 ]
 dev = [
     "pytest>=9.0.3,<10",
