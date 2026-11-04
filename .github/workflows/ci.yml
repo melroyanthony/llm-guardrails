@@ -163,5 +163,6 @@ jobs:
           for py in 3.11 3.14; do
             uv venv --python "$py" "/tmp/smoke-$py"
             uv pip install --python "/tmp/smoke-$py/bin/python" "${wheels[0]}"
-            "/tmp/smoke-$py/bin/python" -c "import llm_guardrails; from importlib.metadata import version; from llm_guardrails._core import pii_redact; text, mapping = pii_redact('Mail a@b.co'); assert 'a@b.co' not in text and mapping; assert version('ferroguard'); print(version('ferroguard'), text)"
+            # -P keeps the checkout off sys.path, so this imports the wheel.
+            "/tmp/smoke-$py/bin/python" -P -c "import llm_guardrails; from importlib.metadata import version; from llm_guardrails._core import pii_redact; text, mapping = pii_redact('Mail a@b.co'); assert 'site-packages' in llm_guardrails.__file__; assert 'a@b.co' not in text and mapping; assert version('ferroguard'); print(version('ferroguard'), llm_guardrails.__file__, text)"
           done
