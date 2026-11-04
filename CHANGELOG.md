@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.2.2](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.2) (2026-11-04)
+
+### Bug Fixes
+
+* fix(release): accept any version below empty Unreleased
+
 ## [0.2.1](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.1) (2026-11-04)
 
 ### Chores
