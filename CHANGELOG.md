@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.2.5](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.5) (2026-11-04)
+
+### Documentation
+
+* docs: community files, pre-commit and justfile
+
 ## [0.2.4](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.4) (2026-11-04)
 
 ### Build
