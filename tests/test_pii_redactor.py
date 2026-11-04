@@ -1,5 +1,7 @@
 """Tests for the PII redaction module."""
 
+import pytest
+
 from llm_guardrails.pii_redactor import PIIRedactor
 
 
@@ -104,8 +106,17 @@ class TestFalsePositives:
 
         plain = "Ref 1234567890123456."
         redacted, mapping = redactor.redact(plain)
-        assert "<<CREDIT_CARD_" not in redacted
+        assert redacted == plain
+        assert "<<PHONE_" not in redacted
         assert not any("CREDIT_CARD" in key for key in mapping)
+
+    def test_phone_rejects_digit_run_on_the_right(self):
+        redactor = PIIRedactor()
+        text = "Call 55512345671234."
+        redacted, mapping = redactor.redact(text)
+
+        assert redacted == text
+        assert mapping == {}
 
     def test_ssn_rejects_invalid_ranges(self):
         redactor = PIIRedactor()
@@ -126,6 +137,21 @@ class TestFalsePositives:
             redacted, mapping = redactor.redact(text)
             assert redacted == text
             assert not any("NAME" in key for key in mapping)
+
+    def test_milliseconds_are_not_name_context(self):
+        redactor = PIIRedactor()
+        text = "The benchmark took 40 ms in New York."
+        redacted, mapping = redactor.redact(text)
+
+        assert redacted == text
+        assert not any("NAME" in key for key in mapping)
+
+    def test_jane_doe_called_is_not_redacted(self):
+        redactor = PIIRedactor()
+        text = "Jane Doe called."
+        redacted, _mapping = redactor.redact(text)
+
+        assert redacted == text
 
     def test_name_with_context_is_redacted(self):
         redactor = PIIRedactor()
@@ -164,3 +190,16 @@ class TestFalsePositives:
 
         assert redacted == text
         assert mapping == {}
+
+    def test_unknown_allow_label_raises(self):
+        with pytest.raises(ValueError, match="NOPE") as raised:
+            PIIRedactor(allow_entities=["EMAIL", "NOPE", "ALSO_BAD"])
+        assert "ALSO_BAD" in str(raised.value)
+
+    def test_unknown_deny_label_raises(self):
+        with pytest.raises(ValueError, match="NOPE"):
+            PIIRedactor(deny_entities=["NOPE"])
+
+    def test_empty_allow_entities_raises(self):
+        with pytest.raises(ValueError, match="allow_entities"):
+            PIIRedactor(allow_entities=[])

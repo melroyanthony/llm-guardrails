@@ -161,10 +161,15 @@ What the library actually does:
   `NAME` (two consecutive capitalised words). A card number is a run of 13–19 digits
   with optional spaces or dashes that also passes the Luhn check. An SSN whose area is
   `000`, `666`, or `9xx`, whose group is `00`, or whose serial is `0000` is left as
-  written. A name or date of birth is redacted only when a context word (`name`,
-  `born`, `DOB`, and a few others) sits next to it. `PIIRedactor` and
-  `GuardrailsPipeline` take `allow_entities` and `deny_entities` (pipeline:
-  `pii_allow_entities`, `pii_deny_entities`). Restoration is a straight string
+  written. A phone-shaped slice inside a longer digit run is left alone.
+  A name or date of birth is redacted only when a context word sits next to
+  it (`name`, `born`, `DOB`, `Dr.`, `Ms.`, or `Dr`/`Ms` followed by a
+  capitalised word). The default redacts less than before: `Jane Doe called`
+  is not redacted, and there is no switch that restores the old match of
+  every title-case pair or every date. `PIIRedactor` and `GuardrailsPipeline`
+  take `allow_entities` and `deny_entities` (pipeline: `pii_allow_entities`,
+  `pii_deny_entities`). An empty allow list raises `ValueError`, and so does
+  a label that is not one of those seven. Restoration is a straight string
   replace of the placeholders.
 - **Injection.** Eight regular expressions (`ignore_previous`, `reveal_system_prompt`,
   `role_play_attack`, `developer_mode`, `encoding_evasion`, `do_anything_now`,

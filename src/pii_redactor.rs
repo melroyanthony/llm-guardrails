@@ -47,8 +47,14 @@ static PII_PATTERNS: Lazy<Vec<PiiPattern>> = Lazy::new(|| {
     ]
 });
 
-static NAME_CONTEXT: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)\b(?:name|named|patient|mr|mrs|ms|miss|dr)\b").unwrap());
+static NAME_CONTEXT: Lazy<Regex> = Lazy::new(|| {
+    // `ms` and `dr` are units as well as honorifics. They count only as
+    // `Ms.`/`Dr.` or when the next word is capitalised (`Dr Smith`).
+    Regex::new(
+        r"(?i:\b(?:name|named|patient|mr|mrs|miss)\b)|(?i:\b(?:ms|dr))\.(?:\s|$)|(?i:\b(?:ms|dr))\s+[A-Z]",
+    )
+    .unwrap()
+});
 
 static DOB_CONTEXT: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\b(?:born|birth|dob|d\.o\.b)\b").unwrap());
@@ -143,14 +149,65 @@ fn has_context(text: &str, start: usize, end: usize, pattern: &Regex) -> bool {
     pattern.is_match(before) || pattern.is_match(after)
 }
 
+fn touches_ascii_digit(text: &str, start: usize, end: usize) -> bool {
+    let bytes = text.as_bytes();
+    let before = start > 0 && bytes[start - 1].is_ascii_digit();
+    let after = end < bytes.len() && bytes[end].is_ascii_digit();
+    before || after
+}
+
 fn match_accepted(label: &str, matched: &str, text: &str, start: usize, end: usize) -> bool {
     match label {
         "CREDIT_CARD" => luhn_valid(matched),
         "SSN" => ssn_valid(matched),
+        "PHONE" => !touches_ascii_digit(text, start, end),
         "NAME" => has_context(text, start, end, &NAME_CONTEXT),
         "DATE_OF_BIRTH" => has_context(text, start, end, &DOB_CONTEXT),
         _ => true,
     }
+}
+
+fn unknown_labels(labels: &[String]) -> Vec<String> {
+    labels
+        .iter()
+        .filter(|label| {
+            let normalised = label.trim().to_ascii_uppercase();
+            normalised.is_empty()
+                || !PII_PATTERNS
+                    .iter()
+                    .any(|pattern| pattern.label == normalised)
+        })
+        .map(|label| label.trim().to_string())
+        .collect()
+}
+
+fn allow_list_error(allow: Option<&[String]>) -> Option<String> {
+    match allow {
+        Some([]) => {
+            Some("allow_entities must not be empty; an empty list would redact nothing".to_string())
+        }
+        _ => None,
+    }
+}
+
+fn validate_entity_lists(allow: Option<&[String]>, deny: Option<&[String]>) -> PyResult<()> {
+    if let Some(message) = allow_list_error(allow) {
+        return Err(pyo3::exceptions::PyValueError::new_err(message));
+    }
+    let mut unknown = Vec::new();
+    if let Some(labels) = allow {
+        unknown.extend(unknown_labels(labels));
+    }
+    if let Some(labels) = deny {
+        unknown.extend(unknown_labels(labels));
+    }
+    if !unknown.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "unknown PII label(s): {}",
+            unknown.join(", ")
+        )));
+    }
+    Ok(())
 }
 
 fn redact_text(
@@ -204,17 +261,24 @@ fn redact_text(
 
 /// Redact PII from text, returning (redacted_text, {placeholder: original}).
 ///
-/// `allow_entities`, when set, limits detection to those labels. `deny_entities`
-/// always skips those labels. Names and dates of birth also need a nearby
-/// context word, and card numbers must pass the Luhn check.
+/// `allow_entities`, when set, limits detection to those labels. An empty list
+/// is rejected: it would redact nothing. `deny_entities` skips those labels.
+/// A label that is not one of the built-in PII labels is rejected. Names and
+/// dates of birth also need a nearby context word, and card numbers must pass
+/// the Luhn check.
 #[pyfunction]
 #[pyo3(signature = (text, allow_entities=None, deny_entities=None))]
 pub fn pii_redact(
     text: &str,
     allow_entities: Option<Vec<String>>,
     deny_entities: Option<Vec<String>>,
-) -> (String, HashMap<String, String>) {
-    redact_text(text, allow_entities.as_deref(), deny_entities.as_deref())
+) -> PyResult<(String, HashMap<String, String>)> {
+    validate_entity_lists(allow_entities.as_deref(), deny_entities.as_deref())?;
+    Ok(redact_text(
+        text,
+        allow_entities.as_deref(),
+        deny_entities.as_deref(),
+    ))
 }
 
 /// Restore original PII values from a mapping produced by `pii_redact`.
@@ -274,8 +338,19 @@ mod tests {
 
         let plain = "Ref 1234567890123456.";
         let (redacted, mapping) = redact(plain);
+        assert_eq!(redacted, plain);
         assert!(!mapping.keys().any(|key| key.contains("CREDIT_CARD")));
-        assert!(!redacted.contains("<<CREDIT_CARD_"));
+        assert!(!redacted.contains("<<PHONE_"));
+    }
+
+    #[test]
+    fn test_phone_rejects_digit_run_on_the_right() {
+        let text = "Call 55512345671234.";
+        let (redacted, mapping) = redact(text);
+        assert_eq!(redacted, text);
+        assert!(mapping.is_empty());
+        let embedded = "55512345671234";
+        assert!(!match_accepted("PHONE", "5551234567", embedded, 0, 10));
     }
 
     #[test]
@@ -300,6 +375,28 @@ mod tests {
             assert_eq!(redacted, text, "{text}");
             assert!(!mapping.keys().any(|key| key.contains("NAME")), "{text}");
         }
+    }
+
+    #[test]
+    fn test_honorific_with_period_is_name_context() {
+        let (redacted, mapping) = redact("Signed by Dr. Jane Doe.");
+        assert!(!redacted.contains("Jane Doe"));
+        assert_eq!(mapping["<<NAME_1>>"], "Jane Doe");
+    }
+
+    #[test]
+    fn test_milliseconds_are_not_name_context() {
+        let text = "The benchmark took 40 ms in New York.";
+        let (redacted, mapping) = redact(text);
+        assert_eq!(redacted, text);
+        assert!(!mapping.keys().any(|key| key.contains("NAME")));
+    }
+
+    #[test]
+    fn test_jane_doe_called_is_not_redacted() {
+        let text = "Jane Doe called.";
+        let (redacted, _) = redact(text);
+        assert_eq!(redacted, text);
     }
 
     #[test]
@@ -345,5 +442,22 @@ mod tests {
         let (redacted, mapping) = redact_text(text, None, Some(&deny));
         assert_eq!(redacted, text);
         assert!(mapping.is_empty());
+    }
+
+    #[test]
+    fn test_unknown_labels_are_named() {
+        let labels = vec![
+            "EMAIL".to_string(),
+            "NOPE".to_string(),
+            "ALSO_BAD".to_string(),
+        ];
+        let unknown = unknown_labels(&labels);
+        assert_eq!(unknown, vec!["NOPE".to_string(), "ALSO_BAD".to_string()]);
+    }
+
+    #[test]
+    fn test_empty_allow_entities_is_rejected() {
+        let error = allow_list_error(Some(&[])).expect("empty allow list");
+        assert!(error.contains("allow_entities"));
     }
 }

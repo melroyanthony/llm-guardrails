@@ -16,12 +16,16 @@ class PIIRedactor:
     such as ``<<EMAIL_1>>`` and returns a mapping that allows exact
     restoration later.
 
-    ``allow_entities`` limits detection to those labels. ``deny_entities``
+    ``allow_entities`` limits detection to those labels. An empty list
+    raises ``ValueError`` because it would redact nothing. ``deny_entities``
     skips those labels. A denied label wins when it is also allowed.
-    Card numbers must pass the Luhn check. An SSN whose area is ``000``,
-    ``666``, or ``9xx``, whose group is ``00``, or whose serial is ``0000``
-    is left alone. A name or date of birth is redacted only when a context
-    word such as ``name`` or ``born`` / ``DOB`` sits next to it.
+    A label outside the built-in set raises ``ValueError`` and names the
+    unknown label. Card numbers must pass the Luhn check. An SSN whose area
+    is ``000``, ``666``, or ``9xx``, whose group is ``00``, or whose serial
+    is ``0000`` is left alone. A name or date of birth is redacted only when
+    a context word such as ``name``, ``born``, ``DOB``, ``Dr.``, or ``Ms.``
+    sits next to it. ``Jane Doe called`` is not redacted. There is no switch
+    that restores the old match of every title-case pair or every date.
 
     Example
     -------
@@ -38,6 +42,8 @@ class PIIRedactor:
         allow_entities: list[str] | None = None,
         deny_entities: list[str] | None = None,
     ) -> None:
+        # Reject an empty allow list and unknown labels before any text is kept.
+        pii_redact("", allow_entities, deny_entities)
         self.allow_entities = allow_entities
         self.deny_entities = deny_entities
 
