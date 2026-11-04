@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.2.7](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.7) (2026-11-04)
+
 ### Bug Fixes
 
 * Injection rules run on normalised text (NFKC, invisible characters removed, common homoglyphs folded, spaced-out letters collapsed). A standalone spaced run still needs four letters. Once that run has started, two or more spaces are a word break emitted as one space, and a later spaced word of three letters collapses too, so "i g n o r e  a l l  p r e v i o u s  i n s t r u c t i o n s" and "ignore a l l previous instructions" score like the plain phrase. "I a m fine" still scores 0.
