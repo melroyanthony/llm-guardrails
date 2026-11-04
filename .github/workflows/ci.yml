@@ -146,7 +146,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Build one abi3 wheel
-        run: uvx --from maturin==1.16.0 maturin build --release --interpreter python3.11 --out dist --manylinux auto
+        run: uvx --from maturin==1.16.0 maturin build --release --interpreter python3.11 --out dist --compatibility pypi
 
       - name: Install Python 3.14 and import the wheel
         run: |
