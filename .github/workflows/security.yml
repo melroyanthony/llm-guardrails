@@ -54,5 +54,6 @@ jobs:
 
       - name: Audit locked Python dependencies
         run: |
+          # --all-extras is the api extra. The default dev group is included too.
           uv export --frozen --all-extras --no-emit-project --no-header -o /tmp/requirements.txt
           uvx pip-audit==2.9.0 --requirement /tmp/requirements.txt --strict

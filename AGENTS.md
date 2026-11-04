@@ -34,7 +34,7 @@ When an intent matches a skill under `.claude/skills/`, read that skill before a
 ## Library conventions
 
 - **Rust.** `cargo fmt` and `cargo clippy --all-targets -- -D warnings` must pass. Guard behaviour lives in `src/`. Fallible paths return `Result`. `Regex::new` inside a `Lazy` static may panic: a bad pattern is a programmer error. Do not add `unwrap` on caller input.
-- **Python.** Wrappers stay thin. Detection logic does not move back into `llm_guardrails/`. Tooling is `uv` only. Ruff lints and formats. `target-version` is `py311`.
+- **Python.** Wrappers stay thin. Detection logic does not move back into `llm_guardrails/`. Tooling is `uv` only. Ruff lints and formats. `target-version` is `py311`. pytest and ruff are the default `dev` dependency group. The `api` extra is FastAPI. `uv sync --locked --all-extras` installs both. There is no `dev` extra.
 - **API.** `api/main.py` calls `GuardrailsPipeline`. It does not grow its own checks and it does not load environment variables.
 - **Release.** A releasable push to `main` commits the version bump and publishes the tag in one run. The highest bump since the last tag wins. `chore(release)` does not bump again. The job pushes that commit to `main` without force, then pushes the tag. It does not publish a wheel.
 

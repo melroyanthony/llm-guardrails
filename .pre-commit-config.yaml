@@ -1,0 +1,40 @@
+# Third-party hooks are pinned to the latest stable release of each repository.
+# Ruff's pin matches the ruff version in uv.lock (0.17.3).
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: fix-byte-order-marker
+      - id: check-yaml
+      - id: check-toml
+      - id: detect-private-key
+      - id: mixed-line-ending
+      - id: forbid-new-submodules
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+        args: [--check]
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt --check
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: cargo-clippy
+        name: cargo clippy -D warnings
+        entry: cargo clippy --all-targets -- -D warnings
+        language: system
+        pass_filenames: false
+        always_run: true
