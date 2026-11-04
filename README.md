@@ -173,8 +173,11 @@ What the library actually does:
   replace of the placeholders.
 - **Injection.** Eight regular expressions (`ignore_previous`, `reveal_system_prompt`,
   `role_play_attack`, `developer_mode`, `encoding_evasion`, `do_anything_now`,
-  `system_role_injection`, `token_smuggling`). The score is the highest matching weight,
-  plus `0.10` when two or more rules match, capped at `1.0`.
+  `system_role_injection`, `token_smuggling`). Text is normalised first: NFKC,
+  invisible characters removed, common homoglyphs folded, and spaced-out letters
+  collapsed (`i g n o r e`). The `DAN` token is uppercase only, so "Dan" is not a
+  jailbreak; "do anything now" still matches in any case. The score is the highest
+  matching weight, plus `0.10` when two or more rules match, capped at `1.0`.
 - **Bias.** A handful of stereotype patterns, a gendered-token imbalance check, and an
   absolute-generalisation pattern. The score is a weighted sum of those hits, capped at `1.0`.
 - **Output.** Optional max length, a top-level JSON `type` and `required` check (not full
