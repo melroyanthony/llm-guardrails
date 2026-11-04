@@ -31,6 +31,12 @@ class InjectionResult(BaseModel):
 class InjectionDetector:
     """Score and classify user prompts for injection risk.
 
+    The text is normalised before the rules run: NFKC, invisible characters
+    removed, common homoglyphs folded to ASCII, and spaced-out letters
+    collapsed. The jailbreak token ``DAN`` is matched in uppercase only, so
+    a person named Dan is not flagged. ``do anything now`` still matches in
+    any case.
+
     Parameters
     ----------
     threshold : float

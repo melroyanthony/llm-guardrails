@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+* Injection rules run on normalised text (NFKC, invisible characters removed, common homoglyphs folded, spaced-out letters collapsed), so those evasions score like the plain phrase.
+* The DAN rule is case-sensitive. A name such as "Dan" is no longer flagged. Only the uppercase token DAN, or the phrase "do anything now" in any case, matches. There is no switch that restores the old case-insensitive DAN match.
+
 ## [0.2.6](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.6) (2026-11-04)
 
 ### Bug Fixes
