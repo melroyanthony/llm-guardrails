@@ -45,3 +45,7 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+
+# Scratch checkouts from scripts/install-harness-from.sh
+.claude/upstream/
+.claude/worktrees/

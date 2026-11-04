@@ -1,0 +1,9 @@
+---
+description: Size, typing, and test shape for Python and Rust
+globs: "**/*.{py,rs}"
+alwaysApply: false
+---
+
+Follow `.claude/rules/coding-standards.md` and `AGENTS.md`.
+
+Python tooling is uv and ruff. Rust guard logic stays in `src/`. Do not rename `llm_guardrails`.

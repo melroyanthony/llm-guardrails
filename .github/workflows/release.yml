@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.actor != 'github-actions[bot]' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, '🔖 chore(release):')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Publish the release commit and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_subject.py \
+            --decide \
+            --since-tag \
+            --version-file .version \
+            --rev HEAD > /tmp/decision.json
+          action="$(python3 -c 'import json; print(json.load(open("/tmp/decision.json"))["action"])')"
+          if [ "$action" != "publish" ]; then
+            echo "release skipped: ${action}"
+            exit 0
+          fi
+          python3 scripts/release_publish.py publish --decision-file /tmp/decision.json

@@ -6,9 +6,7 @@ from llm_guardrails.bias_scorer import BiasScorer
 class TestNeutralText:
     def test_neutral_text_low_score(self):
         scorer = BiasScorer()
-        report = scorer.score(
-            "The weather today is sunny with a high of 75 degrees."
-        )
+        report = scorer.score("The weather today is sunny with a high of 75 degrees.")
         assert report.score == 0.0
         assert report.flags == []
 

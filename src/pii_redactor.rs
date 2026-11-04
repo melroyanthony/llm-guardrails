@@ -72,7 +72,7 @@ pub fn pii_redact(text: &str) -> (String, HashMap<String, String>) {
         for (start, end, original) in &matches {
             let count = counters.entry(pattern.label).or_insert(0);
             *count += 1;
-            let placeholder = format!("<<{}_{}>>"  , pattern.label, count);
+            let placeholder = format!("<<{}_{}>>", pattern.label, count);
             replacements.push((*start, *end, placeholder, original.clone()));
         }
 

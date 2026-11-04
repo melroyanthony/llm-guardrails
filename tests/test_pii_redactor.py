@@ -73,10 +73,7 @@ class TestIPAddressRedaction:
 class TestRoundTrip:
     def test_redact_then_restore(self):
         redactor = PIIRedactor()
-        original = (
-            "Email alice@example.com, call 555-123-4567, "
-            "SSN 123-45-6789."
-        )
+        original = "Email alice@example.com, call 555-123-4567, SSN 123-45-6789."
         redacted, mapping = redactor.redact(original)
 
         # Nothing from the original PII should survive redaction.

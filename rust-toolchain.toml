@@ -1,0 +1,5 @@
+[toolchain]
+# Tracks the latest stable release. Do not pin a dated channel or a beta.
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

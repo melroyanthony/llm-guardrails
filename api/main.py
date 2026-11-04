@@ -14,7 +14,7 @@ GET  /health        -- Health check
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from llm_guardrails.pipeline import GuardrailsPipeline
@@ -25,7 +25,10 @@ from llm_guardrails.pipeline import GuardrailsPipeline
 
 app = FastAPI(
     title="LLM Guardrails API",
-    description="Responsible AI toolkit -- PII redaction, injection detection, bias scoring, output validation.",
+    description=(
+        "Responsible AI toolkit -- PII redaction, injection detection, "
+        "bias scoring, output validation."
+    ),
     version="0.1.0",
 )
 

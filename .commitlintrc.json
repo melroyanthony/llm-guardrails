@@ -1,0 +1,42 @@
+{
+  "rules": {
+    "type-enum": [
+      2,
+      "always",
+      [
+        "feat",
+        "fix",
+        "docs",
+        "style",
+        "refactor",
+        "perf",
+        "test",
+        "build",
+        "ci",
+        "chore",
+        "deps",
+        "security",
+        "revert"
+      ]
+    ],
+    "scope-enum": [
+      1,
+      "always",
+      [
+        "core",
+        "api",
+        "docs",
+        "deps",
+        "ci",
+        "release",
+        "repo",
+        "agents",
+        "commands",
+        "hooks",
+        "rules",
+        "security"
+      ]
+    ],
+    "header-max-length": [2, "always", 72]
+  }
+}
