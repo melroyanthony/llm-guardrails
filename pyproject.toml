@@ -36,6 +36,8 @@ api = [
     "fastapi>=0.110,<1.0",
     "uvicorn[standard]>=0.54.0,<1.0",
 ]
+
+[dependency-groups]
 dev = [
     "pytest>=9.0.3,<10",
     "ruff>=0.4,<1.0",

@@ -4,7 +4,7 @@ set shell := ["bash", "-uc"]
 default:
     @just --list
 
-# Install the locked environment and build the PyO3 extension
+# Install the api extra and the default dev group, then build the extension
 setup:
     uv sync --locked --all-extras
     uv run --with maturin maturin develop

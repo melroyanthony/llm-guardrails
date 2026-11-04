@@ -79,8 +79,10 @@ python3 scripts/release_subject.py --self-test
 python3 scripts/release_publish.py --self-test
 ```
 
-`uv sync` builds the extension. pytest needs that build because the wrappers import
-`llm_guardrails._core`. `cargo test` runs the Rust tests without Python.
+`uv sync --locked --all-extras` builds the extension and installs the `api`
+extra. pytest and ruff come from the default `dev` dependency group, not an
+extra. pytest needs that build because the wrappers import `llm_guardrails._core`.
+`cargo test` runs the Rust tests without Python.
 With [just](https://just.systems/) installed, `just setup` syncs the lockfile and
 runs `maturin develop`, and `just ci` runs the checks above plus
 `python3 scripts/test_guardrails.py`.
@@ -148,7 +150,7 @@ GitHub Actions, on pull requests and on pushes to `main`:
 - `CI` runs ruff, pytest on Python 3.11 and 3.14, and `cargo fmt`, clippy, and `cargo test`
 - `Security` runs cargo-deny and pip-audit
 - `CodeQL` analyses Python and Rust with `build-mode: none`
-- `Release` runs on a push to `main`. It commits `.version` and `CHANGELOG.md`, pushes that commit to `main` without `--force`, then pushes the tag. It does not publish a wheel
+- `Release` runs on a push to `main`. It commits `.version` and `CHANGELOG.md`, pushes that commit to `main` without `--force`, then pushes the tag. It does not publish a wheel. See [RELEASING.md](RELEASING.md)
 
 ## 🔒 Security
 
@@ -223,6 +225,7 @@ sequenceDiagram
 ## 🤝 Contributing
 
 - 🛠️ [CONTRIBUTING.md](CONTRIBUTING.md) — setup, tests, lint, and pull requests
+- 🔖 [RELEASING.md](RELEASING.md) — how a push to `main` is versioned and tagged
 - 🔒 [SECURITY.md](SECURITY.md) — private vulnerability reports
 - 📖 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — Contributor Covenant 2.1
 

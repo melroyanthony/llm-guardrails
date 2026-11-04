@@ -27,9 +27,12 @@ uv sync --locked --all-extras
 uv run --with maturin maturin develop
 ```
 
-`uv sync` installs the locked environment, including the `api` and `dev`
-extras. `maturin develop` builds the PyO3 extension into that environment and
-leaves it editable. pytest imports `llm_guardrails._core`, so the extension
+`uv sync --locked --all-extras` installs the locked environment. `--all-extras`
+is the `api` extra (FastAPI and uvicorn). pytest and ruff are the default
+`dev` dependency group in `pyproject.toml`, not an extra, so they are
+installed without `--extra dev`. `maturin develop` builds the PyO3 extension
+into that environment and leaves it editable. pytest imports
+`llm_guardrails._core`, so the extension
 has to exist first. Python edits are picked up from the editable install.
 Run `uv run --with maturin maturin develop` again after you change Rust.
 
