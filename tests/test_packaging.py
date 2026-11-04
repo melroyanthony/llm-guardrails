@@ -43,9 +43,12 @@ def test_release_publishes_inside_release_yml():
         "_x86_64.whl",
         "_arm64.whl",
     ):
-        assert tag in pypi.split("- name: Collect distributions", 1)[1].split(
-            "- name: Publish to PyPI", 1
-        )[0]
+        assert (
+            tag
+            in pypi.split("- name: Collect distributions", 1)[1].split(
+                "- name: Publish to PyPI", 1
+            )[0]
+        )
     assert "len(wheels) != 5" in pypi
     assert "exactly one sdist" in pypi
     assert "needs: pypi" in sbom
