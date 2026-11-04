@@ -1,11 +1,13 @@
-"""Types for the Rust extension ``llm_guardrails._core``."""
+"""Types for the Rust extension ``llm_guardrails._core``.
 
-from collections.abc import Sequence
+``list[str] | tuple[str, ...]`` matches PyO3 ``Vec<String>``. A bare ``str``
+is not a list of labels: extracting one raises ``TypeError``.
+"""
 
 def pii_redact(
     text: str,
-    allow_entities: Sequence[str] | None = None,
-    deny_entities: Sequence[str] | None = None,
+    allow_entities: list[str] | tuple[str, ...] | None = None,
+    deny_entities: list[str] | tuple[str, ...] | None = None,
 ) -> tuple[str, dict[str, str]]: ...
 def pii_restore(text: str, mapping: dict[str, str]) -> str: ...
 def injection_score(text: str) -> float: ...
@@ -18,6 +20,6 @@ def output_validate(
     max_length: int | None = None,
     check_hallucination: bool = True,
     hallucination_threshold: float = 0.6,
-    required_keywords: Sequence[str] | None = None,
-    blocked_keywords: Sequence[str] | None = None,
+    required_keywords: list[str] | tuple[str, ...] | None = None,
+    blocked_keywords: list[str] | tuple[str, ...] | None = None,
 ) -> tuple[bool, list[dict[str, str]], float]: ...

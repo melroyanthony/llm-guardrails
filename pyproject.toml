@@ -39,7 +39,7 @@ api = [
 [dependency-groups]
 dev = [
     "httpx>=0.27,<1",
-    "mypy>=1.13,<2",
+    "mypy>=2.4.1,<3",
     "pytest>=9.0.3,<10",
     "ruff>=0.4,<1.0",
 ]
