@@ -53,6 +53,88 @@ def test_text_over_max_length_is_rejected(client: TestClient):
     assert "text" in response.text
 
 
+def test_chunked_body_without_content_length_stops_early():
+    import asyncio
+
+    chunk = b"a" * 4096
+    offered = (MAX_BODY_BYTES // len(chunk)) + 12
+    pulled = 0
+
+    async def receive():
+        nonlocal pulled
+        pulled += 1
+        if pulled > offered:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        return {"type": "http.request", "body": chunk, "more_body": True}
+
+    async def run():
+        messages: list[dict] = []
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/guard/input",
+            "raw_path": b"/guard/input",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+            "client": ("127.0.0.1", 50000),
+            "server": ("testserver", 80),
+        }
+
+        async def send(message):
+            messages.append(message)
+
+        await main.app(scope, receive, send)
+        start = next(message for message in messages if message["type"] == "http.response.start")
+        assert start["status"] == 413
+        assert pulled <= (MAX_BODY_BYTES // len(chunk)) + 2
+
+    asyncio.run(run())
+
+
+def test_small_chunked_body_without_content_length_is_accepted():
+    import asyncio
+
+    parts = [b'{"text":', b'"hello"', b"}"]
+    index = 0
+
+    async def receive():
+        nonlocal index
+        if index >= len(parts):
+            return {"type": "http.disconnect"}
+        body = parts[index]
+        index += 1
+        return {"type": "http.request", "body": body, "more_body": index < len(parts)}
+
+    async def run():
+        messages: list[dict] = []
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/guard/input",
+            "raw_path": b"/guard/input",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+            "client": ("127.0.0.1", 50000),
+            "server": ("testserver", 80),
+        }
+
+        async def send(message):
+            messages.append(message)
+
+        await main.app(scope, receive, send)
+        start = next(message for message in messages if message["type"] == "http.response.start")
+        assert start["status"] == 200
+
+    main.reset_for_tests()
+    asyncio.run(run())
+
+
 def test_request_body_over_limit_is_rejected(client: TestClient):
     payload = b'{"text":"' + (b"a" * (MAX_BODY_BYTES + 64)) + b'"}'
     response = client.post(
@@ -130,6 +212,64 @@ def test_expired_mapping_id_is_rejected(client: TestClient, monkeypatch: pytest.
         json={"text": "hello", "pii_mapping_id": mapping_id},
     )
     assert response.status_code == 404
+
+
+def test_mapping_id_is_single_use(client: TestClient):
+    created = client.post(
+        "/guard/input",
+        json={"text": "Email alice@example.com please."},
+    )
+    created_body = created.json()
+    first = client.post(
+        "/guard/output",
+        json={
+            "text": created_body["sanitised_text"],
+            "pii_mapping_id": created_body["pii_mapping_id"],
+        },
+    )
+    assert first.status_code == 200
+    assert "alice@example.com" in first.json()["final_text"]
+    second = client.post(
+        "/guard/output",
+        json={
+            "text": created_body["sanitised_text"],
+            "pii_mapping_id": created_body["pii_mapping_id"],
+        },
+    )
+    assert second.status_code == 404
+
+
+def test_empty_mapping_is_not_stored(client: TestClient):
+    before = len(main._store)
+    response = client.post("/guard/input", json={"text": "Hello there."})
+    assert response.status_code == 200
+    assert response.json()["pii_mapping_id"] is None
+    assert len(main._store) == before
+
+
+def test_full_does_not_store_a_mapping(client: TestClient):
+    before = len(main._store)
+    response = client.post(
+        "/guard/full",
+        json={"text": "Email alice@example.com please."},
+    )
+    assert response.status_code == 200
+    assert response.json()["input_guard"]["pii_mapping_id"] is None
+    assert len(main._store) == before
+    assert "alice@example.com" in response.json()["output_guard"]["final_text"]
+
+
+def test_store_cap_evicts_oldest():
+    from api.pii_store import MappingStore
+
+    store = MappingStore(max_entries=2)
+    first = store.put({"n": "1"}, 60)
+    second = store.put({"n": "2"}, 60)
+    third = store.put({"n": "3"}, 60)
+    assert store.pop(first, 60) is None
+    assert store.pop(second, 60) == {"n": "2"}
+    assert store.pop(third, 60) == {"n": "3"}
+    assert MappingStore().max_entries == 10_000
 
 
 def test_full_restores_without_returning_the_mapping(client: TestClient):

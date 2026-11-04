@@ -11,9 +11,9 @@ POST /guard/output  -- Run output guardrails (validation + bias scoring + PII re
 POST /guard/full    -- Full pipeline: input guards -> simulated LLM -> output guards
 GET  /health        -- Health check
 
-``/guard/input`` returns an opaque ``pii_mapping_id``. The placeholder map stays
-on the server for ``MAPPING_TTL_SECONDS``. ``/guard/output`` sends that id back
-and never accepts the map itself.
+``/guard/input`` returns an opaque ``pii_mapping_id``. A non-empty map stays in
+this process for ``MAPPING_TTL_SECONDS`` and is popped on the first
+``/guard/output`` call. The id is not shared across workers.
 """
 
 from __future__ import annotations
@@ -30,9 +30,10 @@ from llm_guardrails.pipeline import GuardrailsPipeline
 MAX_TEXT_LENGTH = 8_000
 MAX_BODY_BYTES = 32 * 1024
 MAPPING_TTL_SECONDS = 15 * 60
+MAX_MAPPING_ENTRIES = 10_000
 
 _pipeline: GuardrailsPipeline | None = None
-_store = MappingStore()
+_store = MappingStore(max_entries=MAX_MAPPING_ENTRIES)
 
 
 def package_version() -> str:
@@ -85,9 +86,17 @@ async def limit_request_body(request: Request, call_next):
             declared = None
         if declared is not None and declared > MAX_BODY_BYTES:
             return _body_too_large()
-    body = await request.body()
-    if len(body) > MAX_BODY_BYTES:
-        return _body_too_large()
+    # Count chunked bodies as they arrive. Stop at the cap instead of reading
+    # a request that never sent Content-Length all the way through.
+    received = 0
+    chunks: list[bytes] = []
+    async for chunk in request.stream():
+        received += len(chunk)
+        if received > MAX_BODY_BYTES:
+            return _body_too_large()
+        if chunk:
+            chunks.append(chunk)
+    request._body = b"".join(chunks)
     return await call_next(request)
 
 
@@ -105,11 +114,12 @@ class OutputRequest(_RequestModel):
         max_length=MAX_TEXT_LENGTH,
         description="LLM-generated output to validate.",
     )
-    pii_mapping_id: str = Field(
-        ...,
+    pii_mapping_id: str | None = Field(
+        None,
         description=(
-            "Opaque id returned by /guard/input. The placeholder map stays on the server "
-            f"for {MAPPING_TTL_SECONDS} seconds and is not accepted from the client."
+            "Opaque id returned by /guard/input. The placeholder map stays in this "
+            f"process for {MAPPING_TTL_SECONDS} seconds. The id works once. "
+            "Omit it when /guard/input stored nothing."
         ),
     )
 
@@ -132,7 +142,7 @@ class FullRequest(_RequestModel):
 
 class InputResponse(BaseModel):
     sanitised_text: str
-    pii_mapping_id: str
+    pii_mapping_id: str | None
     injection_score: float
     is_injection: bool
     matched_rules: list[str]
@@ -159,9 +169,9 @@ class HealthResponse(BaseModel):
     version: str
 
 
-def _input_response(text: str) -> tuple[InputResponse, dict[str, str], bool]:
+def _input_response(text: str, *, remember: bool) -> tuple[InputResponse, dict[str, str], bool]:
     pre = get_pipeline().pre_process(text)
-    mapping_id = _store.put(pre.pii_mapping, MAPPING_TTL_SECONDS)
+    mapping_id = _store.put(pre.pii_mapping, MAPPING_TTL_SECONDS) if remember else None
     response = InputResponse(
         sanitised_text=pre.sanitised_text,
         pii_mapping_id=mapping_id,
@@ -188,8 +198,10 @@ def _output_response(text: str, mapping: dict[str, str]) -> OutputResponse:
     )
 
 
-def _load_mapping(mapping_id: str) -> dict[str, str]:
-    mapping = _store.get(mapping_id, MAPPING_TTL_SECONDS)
+def _load_mapping(mapping_id: str | None) -> dict[str, str]:
+    if not mapping_id:
+        return {}
+    mapping = _store.pop(mapping_id, MAPPING_TTL_SECONDS)
     if mapping is None:
         raise HTTPException(status_code=404, detail="Unknown or expired PII mapping id.")
     return mapping
@@ -204,7 +216,7 @@ async def health():
 @app.post("/guard/input", response_model=InputResponse, tags=["guardrails"])
 async def guard_input(req: InputRequest):
     """Run input-side guardrails on user text."""
-    response, _mapping, _blocked = _input_response(req.text)
+    response, _mapping, _blocked = _input_response(req.text, remember=True)
     return response
 
 
@@ -218,7 +230,7 @@ async def guard_output(req: OutputRequest):
 @app.post("/guard/full", response_model=FullResponse, tags=["guardrails"])
 async def guard_full(req: FullRequest):
     """Full pipeline: input guardrails -> (simulated) LLM -> output guardrails."""
-    input_result, mapping, blocked = _input_response(req.text)
+    input_result, mapping, blocked = _input_response(req.text, remember=False)
     if blocked:
         return FullResponse(input_guard=input_result, blocked=True)
 

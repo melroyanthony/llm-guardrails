@@ -116,10 +116,15 @@ rejected with `413` and a message that names the limit. A `text` field over the
 character limit is `422`.
 
 **Breaking.** `/guard/input` no longer returns the placeholder map. The map stays
-on the server for 15 minutes under `pii_mapping_id`. `/guard/output` takes that
-id and rejects a client-supplied `pii_mapping`. Raw PII is not in the input
-response. The library `GuardrailsPipeline` still returns the map to in-process
-callers; only the HTTP API hides it.
+in process memory for 15 minutes under `pii_mapping_id`, or it is not stored at
+all when the map is empty. `/guard/full` does not store a map: restore happens
+inside that request, and its `pii_mapping_id` is null. `/guard/output` takes the
+id, pops the map, and rejects a client-supplied `pii_mapping`. A second call with
+the same id is `404`, the same as an unknown or expired id. An unknown field on
+`/guard/input` or `/guard/full` is `422`. Raw PII is not in the input response.
+The store is not shared: an id works only for the worker or replica that created
+it, and it is lost on restart. The library `GuardrailsPipeline` still returns the
+map to in-process callers; only the HTTP API hides it.
 
 Input example:
 

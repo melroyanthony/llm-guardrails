@@ -4,7 +4,7 @@
 
 ### Breaking changes
 
-* `/guard/input` no longer returns the PII mapping. It returns an opaque `pii_mapping_id`, and the server keeps the map for 15 minutes. `/guard/output` takes that id and rejects a client-supplied mapping. Request `text` is limited to 8000 characters (422). Request bodies over 32768 bytes are rejected with 413.
+* `/guard/input` no longer returns the PII mapping. It returns an opaque `pii_mapping_id`, and the server keeps a non-empty map in process memory for 15 minutes. The id is single-use: `/guard/output` pops it, and a second call is 404, the same as an unknown or expired id. Ids work only for one worker or replica and are lost on restart. `/guard/full` does not store a map. `/guard/output` rejects a client-supplied mapping. An unknown field on `/guard/input` or `/guard/full` is 422. Request `text` is limited to 8000 characters (422). Request bodies over 32768 bytes are rejected with 413.
 
 ### Bug Fixes
 
