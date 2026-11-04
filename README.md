@@ -35,8 +35,9 @@ uv run uvicorn api.main:app --reload
 | 📖 Interactive API docs | http://localhost:8000/docs |
 | 📄 OpenAPI document | http://localhost:8000/openapi.json |
 
-`GET /health` returns `{"status":"ok","version":"0.1.0"}`. That version string is hard-coded
-in `api/main.py`. The package version comes from `Cargo.toml` and is `0.2.0`.
+`GET /health` returns `{"status":"ok","version":"<installed>"}`. That version is the
+installed `llm_guardrails` distribution, read from package metadata. Maturin takes
+it from `Cargo.toml`. It is not hard-coded in `api/main.py`.
 
 Guard text from Python:
 
@@ -105,10 +106,25 @@ FastAPI builds the document from the route functions.
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| `GET` | `/health` | Returns status and the hard-coded demo version |
-| `POST` | `/guard/input` | `pre_process`: PII placeholders and an injection score |
-| `POST` | `/guard/output` | `post_process`: validation, bias score, PII restore |
+| `GET` | `/health` | Returns status and the installed package version |
+| `POST` | `/guard/input` | `pre_process`: PII placeholders, an injection score, and an opaque `pii_mapping_id` |
+| `POST` | `/guard/output` | `post_process`: validation, bias score, and PII restore for that id |
 | `POST` | `/guard/full` | Input guards, then a stub or caller-supplied response, then output guards |
+
+`text` is limited to 8000 characters. A request body larger than 32768 bytes is
+rejected with `413` and a message that names the limit. A `text` field over the
+character limit is `422`.
+
+**Breaking.** `/guard/input` no longer returns the placeholder map. The map stays
+in process memory for 15 minutes under `pii_mapping_id`, or it is not stored at
+all when the map is empty. `/guard/full` does not store a map: restore happens
+inside that request, and its `pii_mapping_id` is null. `/guard/output` takes the
+id, pops the map, and rejects a client-supplied `pii_mapping`. A second call with
+the same id is `404`, the same as an unknown or expired id. An unknown field on
+`/guard/input` or `/guard/full` is `422`. Raw PII is not in the input response.
+The store is not shared: an id works only for the worker or replica that created
+it, and it is lost on restart. The library `GuardrailsPipeline` still returns the
+map to in-process callers; only the HTTP API hides it.
 
 Input example:
 
@@ -134,7 +150,8 @@ regex helpers in `src/`. The demo routes have no automated test yet.
 ## 🚢 Deployment
 
 The image in `Dockerfile` builds a wheel with maturin on `python:3.12-slim`, installs that
-wheel plus FastAPI and uvicorn, and serves `api.main:app` on port 8000.
+wheel plus FastAPI and `uvicorn[standard]>=0.54.0,<1.0`, and serves `api.main:app` on
+port 8000. The image copies uv `0.13.7`, not a floating `latest` tag.
 
 ```bash
 docker build -t llm-guardrails .

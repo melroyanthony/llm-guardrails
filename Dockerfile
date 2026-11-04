@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
@@ -28,14 +28,14 @@ RUN maturin build --release --out dist
 # ── Runtime stage ─────────────────────────────────────────────────────
 FROM python:3.12-slim
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
 # Install the built wheel + API dependencies
 COPY --from=builder /app/dist/*.whl /tmp/
 RUN uv pip install --system --no-cache /tmp/*.whl && \
-    uv pip install --system --no-cache "fastapi>=0.110,<1.0" "uvicorn[standard]>=0.29,<1.0" && \
+    uv pip install --system --no-cache "fastapi>=0.110,<1.0" "uvicorn[standard]>=0.54.0,<1.0" && \
     rm -rf /tmp/*.whl
 
 COPY api/ api/
