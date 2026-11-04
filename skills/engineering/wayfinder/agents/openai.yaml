@@ -1,0 +1,5 @@
+interface:
+  display_name: "Wayfinder"
+  short_description: "Investigation map for multi-session fog of war"
+policy:
+  allow_implicit_invocation: false

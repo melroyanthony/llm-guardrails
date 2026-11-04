@@ -1,16 +1,32 @@
 ---
-description: Review the diff for secrets, unsafe input handling, and over-claimed safety.
+description: "Run security-focused code review targeting OWASP Top 10 and common vulnerabilities"
+allowed-tools: Read, Glob, Grep, Bash, Agent
 ---
 
-# Security review
+# Security Review
 
-Look for:
+Perform a security-focused code review.
 
-- secrets, tokens, or live PII in code, fixtures, or logs
-- `eval`, shell injection, or unsanitized HTML in the demo
-- a new crate or package with no `deny.toml` or audit story
-- README or API copy that calls the regex guards a complete injection, bias, or HIPAA control
+## Input
+$ARGUMENTS — Target for review. Can be a file, directory, or git range. Defaults to `solution/`.
 
-The output validator is not a full JSON Schema validator. Say so if a change implies it is.
+## Process
 
-Report findings by severity. Do not merge.
+1. **Spawn security-reviewer agent** to perform the review
+2. The agent will scan for:
+   - OWASP Top 10 vulnerabilities
+   - Hardcoded secrets and credentials
+   - Authentication and authorization flaws
+   - Input validation gaps
+   - Dependency vulnerabilities
+3. Run automated security tools:
+   - Python: `bandit`, `safety check`
+   - Node.js: `npm audit`
+4. Review findings and provide remediation steps
+
+## Output
+Security assessment report with:
+- Findings by severity (critical/high/medium/low/info)
+- CWE references where applicable
+- Specific remediation steps for each finding
+- Overall security posture assessment

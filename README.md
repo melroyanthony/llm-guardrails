@@ -76,6 +76,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 python3 scripts/release_subject.py --self-test
+python3 scripts/release_publish.py --self-test
 ```
 
 `uv sync` builds the extension. pytest needs that build because the wrappers import
@@ -144,7 +145,7 @@ GitHub Actions, on pull requests and on pushes to `main`:
 - `CI` runs ruff, pytest on Python 3.11 and 3.14, and `cargo fmt`, clippy, and `cargo test`
 - `Security` runs cargo-deny and pip-audit
 - `CodeQL` analyses Python and Rust with `build-mode: none`
-- `Release` opens a release pull request. It does not push to `main`
+- `Release` runs on a push to `main`. It commits `.version` and `CHANGELOG.md`, pushes that commit to `main` without `--force`, then pushes the tag. It does not publish a wheel
 
 ## 🔒 Security
 

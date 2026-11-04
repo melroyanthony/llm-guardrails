@@ -1,0 +1,5 @@
+interface:
+  display_name: "Domain Modeling"
+  short_description: "Sharpen glossary, CONTEXT.md, and ADRs"
+policy:
+  allow_implicit_invocation: true

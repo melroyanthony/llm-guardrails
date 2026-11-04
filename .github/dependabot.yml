@@ -3,11 +3,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: monthly
-    commit-message:
-      prefix: "⬆️"
-    labels:
-      - dependencies
+      interval: weekly
     groups:
       github-actions:
         patterns:
@@ -16,25 +12,17 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: monthly
-    commit-message:
-      prefix: "⬆️"
-    labels:
-      - dependencies
+      interval: weekly
     groups:
-      rust:
+      cargo:
         patterns:
           - "*"
 
   - package-ecosystem: uv
     directory: /
     schedule:
-      interval: monthly
-    commit-message:
-      prefix: "⬆️"
-    labels:
-      - dependencies
+      interval: weekly
     groups:
-      python:
+      uv:
         patterns:
           - "*"

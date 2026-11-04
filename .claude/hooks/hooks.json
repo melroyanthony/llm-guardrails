@@ -1,0 +1,110 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git *)",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/git-guardrails.sh\"'"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git *)",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/commit-style.sh\"'"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/stack-guardrails.sh\" pre'"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/stack-guardrails.sh\" pre'"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/quality-gate.sh\"'"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/doc-warning.sh\"'"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/protect-blocks.sh\"'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/stack-guardrails.sh\" post'"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/debug-check.sh\"'"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/secrets-scan.sh\"'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [ \"$CLAUDE_PLUGIN_ROOT\" = \"$CLAUDE_PROJECT_DIR\" ]; then exit 0; fi; bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/scripts/commit-reminder.sh\"'"
+          }
+        ]
+      }
+    ]
+  }
+}

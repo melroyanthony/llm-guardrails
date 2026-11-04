@@ -1,0 +1,26 @@
+---
+description: "Security rules applied to all code"
+paths: ["**/*.py", "**/*.rs", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.yaml", "**/*.yml", "**/*.json"]
+---
+
+# Security Rules
+
+## Never Do
+- Hardcode secrets, API keys, passwords, or tokens
+- Use `eval()` or equivalent dynamic code execution
+- Disable SSL/TLS verification
+- Use MD5 or SHA1 for security purposes
+- Store passwords in plaintext
+- Use `innerHTML` or `dangerouslySetInnerHTML` without sanitization
+- Trust user input without validation
+- Use `*` for CORS origins in production
+
+## Always Do
+- Use parameterized queries (never string concatenation for SQL)
+- Validate and sanitize all user input at API boundaries
+- Use HTTPS for all external API calls
+- Set secure, httpOnly, sameSite flags on cookies
+- Use bcrypt or argon2 for password hashing
+- Apply rate limiting to authentication endpoints
+- Log security events (auth failures, permission denials)
+- Use CSP headers to prevent XSS

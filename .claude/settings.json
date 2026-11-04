@@ -1,7 +1,150 @@
 {
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit",
+      "Write",
+      "Bash(git:*)",
+      "Bash(make:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(python:*)",
+      "Bash(uv:*)",
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(gh:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(chmod:*)",
+      "Bash(curl:*)",
+      "Bash(ruff:*)",
+      "Bash(pytest:*)",
+      "Bash(cargo:*)",
+      "Bash(bandit:*)",
+      "Bash(terraform:*)",
+      "Bash(kubectl:*)",
+      "Bash(helm:*)",
+      "Bash(newman:*)"
+    ],
+    "deny": []
+  },
   "attribution": {
     "commit": "",
     "pr": ""
   },
-  "includeCoAuthoredBy": false
+  "includeCoAuthoredBy": false,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git *)",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/git-guardrails.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git *)",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/commit-style.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/stack-guardrails.sh\" pre"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/stack-guardrails.sh\" pre"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/quality-gate.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/doc-warning.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/protect-blocks.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/stack-guardrails.sh\" post"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/debug-check.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/secrets-scan.sh\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/commit-reminder.sh\""
+          }
+        ]
+      }
+    ]
+  }
 }

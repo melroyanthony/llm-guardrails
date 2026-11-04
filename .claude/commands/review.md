@@ -1,15 +1,31 @@
 ---
-description: Review the current diff on two axes, standards and spec fidelity.
+description: "Run code review on files, directories, or git diffs"
+allowed-tools: Read, Glob, Grep, Bash, Agent
 ---
 
-# Review
+# Code Review
 
-Read the diff against `main`. Report two separate lists.
+Perform a thorough staff-level code review.
 
-**Standards.** `AGENTS.md` conventions: uv, ruff, clippy `-D warnings`, thin Python wrappers,
-no invented configuration, no Python newer than `.python-version`, no package rename, no push to `main`.
+## Input
+$ARGUMENTS — Target for review. Can be:
+- A file path: `solution/backend/app/api/routes.py`
+- A directory: `solution/backend/`
+- A git range: `HEAD~3..HEAD`
+- Empty (defaults to all uncommitted changes)
 
-**Spec fidelity.** What the requested change asked for, and what the diff actually does.
+## Process
 
-Findings first, by severity. Do not rewrite the diff in the same breath as the review unless
-the human asked for fixes.
+1. **Spawn code-reviewer agent** to perform the review
+2. If $ARGUMENTS is empty, review `git diff HEAD` (all uncommitted changes)
+3. If $ARGUMENTS is a git range, review `git diff $ARGUMENTS`
+4. If $ARGUMENTS is a file or directory, review all code in that path
+
+The code-reviewer agent will:
+- Review for correctness, maintainability, performance, and security
+- Score quality 1-10
+- Provide findings with severity levels (critical/warning/suggestion/nitpick)
+- Include specific line references and suggested fixes
+
+## Output
+Structured review report with actionable findings.

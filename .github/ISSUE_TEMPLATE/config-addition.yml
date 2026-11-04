@@ -1,0 +1,52 @@
+name: Config Addition
+description: Propose a new agent, command, skill, hook, or rule
+labels: ["internal"]
+body:
+  - type: dropdown
+    id: component-type
+    attributes:
+      label: Component Type
+      description: What type of config are you adding?
+      options:
+        - Agent
+        - Command
+        - Skill
+        - Hook
+        - Rule
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Name
+      description: Proposed name (kebab-case, e.g., `code-reviewer`)
+      placeholder: my-component
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What does this component do?
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model (agents only)
+      description: Which model should this agent use?
+      options:
+        - N/A (not an agent)
+        - opus
+        - sonnet
+        - haiku
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      placeholder: |
+        - [ ] Component file created
+        - [ ] Documented in CLAUDE.md
+        - [ ] Tested in pipeline
+    validations:
+      required: true

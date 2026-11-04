@@ -1,511 +1,985 @@
 #!/usr/bin/env python3
-"""Classify a squash-merge subject and consume ``## Unreleased``.
+"""Classify commits since the last tag and decide the next release.
 
-Stdlib only. The changelog keeps an empty ``## Unreleased`` section at the
-top. A release moves that section's body under the new version heading.
-Handwritten notes win. An empty section gets one bullet from the subject.
+feat bumps minor, and every other type in ``commit-types.json`` bumps patch,
+including test, ci, docs, and chore. A breaking marker (``!`` or a
+``BREAKING CHANGE:`` footer) bumps major once the current version is 1.0.0
+or newer, and bumps minor while the major is still 0. The changelog section
+stays Breaking changes either way. The highest bump among unreleased commits
+wins, so a later patch does not hide an earlier minor. A subject of
+``chore(release): vX.Y.Z`` is skipped, including when it is the tip, so the
+release commit does not start another release.
 
-``chore(release):`` subjects do not bump. ``.claude-plugin/plugin.json`` is
-rewritten only when that file exists.
-
-    python3 scripts/release_subject.py --self-test
+``--self-test`` also checks that the workflow pushes that commit to ``main``
+without a force-push.
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
+import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent.parent
 TYPES_PATH = ROOT / "scripts" / "commit-types.json"
 COMMITLINT_PATH = ROOT / ".commitlintrc.json"
-DEFAULT_REPO = "https://github.com/melroyanthony/llm-guardrails"
+WORKFLOW_PATH = ROOT / ".github" / "workflows" / "release.yml"
+REPO_URL = "https://github.com/melroyanthony/llm-guardrails"
+RELEASE_TITLE = "🔖 chore(release): v{version}"
+RELEASE_SUBJECT = re.compile(r"^chore\(release\): v(\d+\.\d+\.\d+)$")
+PR_SUFFIX = re.compile(r"\s+\(#(\d+)\)\s*$")
+MERGE_PR = re.compile(r"^Merge pull request #(\d+)\b")
+# Conventional Commits: a breaking footer is its own line, not a mention in prose.
+_BREAKING_FOOTER = re.compile(r"^(?:BREAKING CHANGE|BREAKING-CHANGE): \S", re.MULTILINE)
 
-SUBJECT_RE_TEMPLATE = (
-    r"^(?P<type>{types})(?:\((?P<scope>[a-z0-9][a-z0-9._-]*)\))?(?P<breaking>!)?: "
-    r"(?P<desc>[a-z].*)$"
-)
-PR_TRAILER_RE = re.compile(r"\s+\(#(?P<number>\d+)\)\s*$")
-MERGE_RE = re.compile(r"^Merge pull request #(?P<number>\d+)\b")
-UNRELEASED_RE = re.compile(r"^## Unreleased[ \t]*$", re.MULTILINE)
-NEXT_H2_RE = re.compile(r"^## ", re.MULTILINE)
-BREAKING_RE = re.compile(r"^BREAKING CHANGE:", re.MULTILINE)
-
-SECTION_FOR_TYPE = {
-    "feat": "Added",
-    "fix": "Fixed",
-    "security": "Security",
-    "revert": "Removed",
-}
+Push = list[str]
 
 
-class ReleaseError(Exception):
-    """The commit message or changelog cannot be released as given."""
+def load_types() -> dict:
+    """Return the commit-type table."""
+    return json.loads(TYPES_PATH.read_text(encoding="utf-8"))
 
 
-def load_types(path: Path = TYPES_PATH) -> dict:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    types = list(data["types"])
-    minor = set(data["minor"])
-    patch = set(data["patch"])
-    if set(types) != minor | patch:
-        raise ReleaseError("commit-types.json minor+patch must equal types")
-    if minor & patch:
-        raise ReleaseError("commit-types.json minor and patch overlap")
-    return data
+def type_names() -> list[str]:
+    """Return conventional types in commitlint order."""
+    return [item["name"] for item in load_types()["types"]]
 
 
-def assert_commitlint_matches(types: list[str], path: Path = COMMITLINT_PATH) -> None:
-    if not path.is_file():
-        return
-    data = json.loads(path.read_text(encoding="utf-8"))
-    enum = data["rules"]["type-enum"][2]
-    if list(enum) != list(types):
-        raise ReleaseError("commit-types.json types and .commitlintrc.json type-enum differ")
-
-
-def strip_emoji(subject: str) -> str:
-    """Drop leading non-letters so a gitmoji prefix is not part of the type."""
-    match = re.search(r"[A-Za-z]", subject)
-    if match is None:
-        return subject.strip()
-    return subject[match.start() :].strip()
-
-
-def pr_number(message: str) -> str:
-    lines = message.splitlines()
-    if not lines:
-        return ""
-    first = lines[0].strip()
-    merge = MERGE_RE.match(first)
+def pr_number(message: str) -> str | None:
+    """Pull N from ``(#N)`` or ``Merge pull request #N``."""
+    first = _first_line(message)
+    suffix = PR_SUFFIX.search(first)
+    if suffix:
+        return suffix.group(1)
+    merge = MERGE_PR.match(first)
     if merge:
-        return merge.group("number")
-    trailer = PR_TRAILER_RE.search(first)
-    if trailer:
-        return trailer.group("number")
-    return ""
-
-
-def _second_nonempty_line(message: str) -> str:
-    nonempty = [line.strip() for line in message.splitlines() if line.strip()]
-    if len(nonempty) >= 2:
-        return nonempty[1]
-    return nonempty[0] if nonempty else ""
+        return merge.group(1)
+    return None
 
 
 def choose_subject(message: str, pr_title: str | None) -> str:
-    """Pick the subject a squash or merge commit should be classified on."""
-    lines = message.splitlines()
-    first = lines[0].strip() if lines else ""
-    if MERGE_RE.match(first):
-        raw = pr_title.strip() if pr_title and pr_title.strip() else _second_nonempty_line(message)
-    elif pr_title and pr_title.strip():
-        raw = pr_title.strip()
+    """Pick the squash subject, preferring a fetched pull request title."""
+    if pr_title and pr_title.strip():
+        return pr_title.strip()
+    lines = [line.strip() for line in message.splitlines()]
+    first = lines[0] if lines else ""
+    if MERGE_PR.match(first):
+        for line in lines[1:]:
+            if line:
+                return line
+        return first
+    return PR_SUFFIX.sub("", first).strip()
+
+
+def strip_emoji(text: str) -> str:
+    """Drop leading non-letters, including the gitmoji and the space after it."""
+    for index, char in enumerate(text):
+        if char.isalpha():
+            return text[index:].lstrip()
+    return text.strip()
+
+
+def classify(subject: str, body: str, version: str | None = None) -> dict:
+    """Return the bump kind for an already-stripped subject.
+
+    A ``!`` before the colon, or a footer line that starts with
+    ``BREAKING CHANGE: `` or ``BREAKING-CHANGE: `` and then text, is a major
+    bump from 1.0.0 up. Below that it is a minor bump. The changelog section
+    stays ``Breaking changes`` in both cases. A mention in prose or backticks
+    is not a footer. The description must be non-empty and start with a
+    cased letter or a digit. The type, and the scope when one is present,
+    stay conventional.
+    """
+    names = "|".join(type_names())
+    pattern = re.compile(rf"^({names})(\([a-z0-9][a-z0-9._-]*\))?(!)?: (.+)$")
+    match = pattern.match(subject)
+    if match is None or not _description_opens(match.group(4)):
+        return {"bump": "none", "subject": subject}
+    name = match.group(1)
+    entry = next(item for item in load_types()["types"] if item["name"] == name)
+    breaking = match.group(3) is not None or _BREAKING_FOOTER.search(body) is not None
+    if breaking:
+        kind = "minor" if _below_one(version) else "major"
+        section = "Breaking changes"
     else:
-        raw = PR_TRAILER_RE.sub("", first).strip()
-    return strip_emoji(raw)
-
-
-def parse_subject(subject: str, types: list[str]) -> re.Match[str] | None:
-    pattern = SUBJECT_RE_TEMPLATE.format(types="|".join(re.escape(t) for t in types))
-    return re.match(pattern, subject)
-
-
-def classify(message: str, pr_title: str | None, types_doc: dict) -> dict:
-    subject = choose_subject(message, pr_title)
-    types = list(types_doc["types"])
-    match = parse_subject(subject, types)
-    if match is None:
-        return {"bump": "none", "subject": subject, "type": "", "scope": "", "desc": ""}
-    kind = match.group("type")
-    scope = match.group("scope") or ""
-    breaking = bool(match.group("breaking")) or bool(BREAKING_RE.search(message))
-    if kind == "chore" and scope == "release":
-        bump = "none"
-    elif breaking:
-        bump = "major"
-    elif kind in types_doc["minor"]:
-        bump = "minor"
-    elif kind in types_doc["patch"]:
-        bump = "patch"
-    else:
-        bump = "none"
+        kind = entry["bump"]
+        section = entry["section"]
     return {
-        "bump": bump,
+        "bump": kind,
+        "type": name,
+        "section": section,
         "subject": subject,
-        "type": kind,
-        "scope": scope,
-        "desc": match.group("desc"),
     }
 
 
+def _below_one(version: str | None) -> bool:
+    """True when ``version`` is a 0.x release."""
+    if not version or not version.strip():
+        return False
+    return int(version.strip().split(".", 1)[0]) == 0
+
+
 def bump_version(current: str, kind: str) -> str:
-    parts = current.strip().split(".")
-    if len(parts) != 3 or not all(part.isdigit() for part in parts):
-        raise ReleaseError(f"version must be MAJOR.MINOR.PATCH, got {current!r}")
-    major, minor, patch = (int(part) for part in parts)
+    """Apply one semver bump. A major bump below 1.0 stays on 0.x."""
+    major, minor, patch = (int(part) for part in current.strip().split("."))
+    if kind == "major" and major == 0:
+        kind = "minor"
     if kind == "major":
         return f"{major + 1}.0.0"
     if kind == "minor":
         return f"{major}.{minor + 1}.0"
     if kind == "patch":
         return f"{major}.{minor}.{patch + 1}"
-    raise ReleaseError(f"unknown bump {kind}")
+    raise ValueError(f"unknown bump {kind}")
 
 
-def _split_changelog(text: str) -> tuple[str, str, str]:
-    match = UNRELEASED_RE.search(text)
-    if match is None:
-        raise ReleaseError("CHANGELOG.md is missing a '## Unreleased' section")
-    preamble = text[: match.start()]
-    after = text[match.end() :]
-    if after.startswith("\n"):
-        after = after[1:]
-    next_heading = NEXT_H2_RE.search(after)
-    if next_heading is None:
-        body = after
-        rest = ""
-    else:
-        body = after[: next_heading.start()]
-        rest = after[next_heading.start() :]
-    return preamble, body, rest
+_BUMP_RANK = {"none": 0, "patch": 1, "minor": 2, "major": 3}
 
 
-def _synthesized_body(result: dict) -> str:
-    section = SECTION_FOR_TYPE.get(result["type"], "Changed")
-    return f"### {section}\n\n* {result['subject']}\n"
+def _subject_of(message: str, title: str | None) -> str:
+    raw = title.strip() if title and title.strip() else choose_subject(message, None)
+    return strip_emoji(PR_SUFFIX.sub("", raw).strip())
 
 
-def render_changelog(
-    text: str,
-    version: str,
-    result: dict,
-    repo: str,
-    date: str,
-) -> str:
-    preamble, body, rest = _split_changelog(text)
-    notes = body.strip()
-    version_body = notes + "\n" if notes else _synthesized_body(result)
-    heading = f"## [{version}]({repo}/releases/tag/v{version}) ({date})"
-    out = preamble.rstrip() + "\n\n## Unreleased\n\n" + heading + "\n\n" + version_body
-    if rest.strip():
-        if not out.endswith("\n"):
-            out += "\n"
-        out += "\n" + rest.lstrip("\n")
-        if not out.endswith("\n"):
-            out += "\n"
-    elif not out.endswith("\n"):
-        out += "\n"
-    return out
+def decide_unreleased(messages: list[str], version: str, tip_title: str | None = None) -> dict:
+    """Choose skip or publish from commits since the last tag, oldest first.
 
-
-def notes_for_version(text: str, version: str) -> str:
-    heading = re.compile(rf"^## \[{re.escape(version)}\][^\n]*$", re.MULTILINE)
-    match = heading.search(text)
-    if match is None:
-        raise ReleaseError(f"changelog has no section for {version}")
-    after = text[match.end() :]
-    if after.startswith("\n"):
-        after = after[1:]
-    next_heading = NEXT_H2_RE.search(after)
-    body = after if next_heading is None else after[: next_heading.start()]
-    return body.strip() + "\n"
-
-
-def _replace_first_version(text: str, version: str) -> str:
-    updated, count = re.subn(
-        r'(?m)^(version = ")[^"]+(")\s*$',
-        rf"\g<1>{version}\2",
-        text,
-        count=1,
-    )
-    if count != 1:
-        raise ReleaseError("could not find a version field to bump")
-    return updated
-
-
-def bump_package_versions(root: Path, version: str) -> None:
-    """Keep the Python and Rust package versions aligned with ``.version``."""
-    for relative in ("pyproject.toml", "Cargo.toml"):
-        path = root / relative
-        if not path.is_file():
+    The last message is the tip. A release subject on the tip skips the run
+    even when earlier commits would have bumped. Otherwise every releasable
+    commit is kept and the highest bump wins.
+    """
+    if not messages:
+        return {"action": "skip", "reason": "no commits since the last tag"}
+    tip_subject = _subject_of(messages[-1], tip_title)
+    if RELEASE_SUBJECT.match(tip_subject):
+        return {
+            "action": "skip",
+            "reason": "release commit does not start another release",
+            "subject": tip_subject,
+        }
+    changes: list[dict[str, str]] = []
+    best = "none"
+    for index, message in enumerate(messages):
+        title = tip_title if index == len(messages) - 1 else None
+        subject = _subject_of(message, title)
+        if RELEASE_SUBJECT.match(subject):
             continue
-        path.write_text(
-            _replace_first_version(path.read_text(encoding="utf-8"), version),
-            encoding="utf-8",
+        classified = classify(subject, message, version)
+        if classified["bump"] == "none":
+            continue
+        changes.append(
+            {
+                "section": classified["section"],
+                "subject": classified["subject"],
+                "bump": classified["bump"],
+            }
         )
+        if _BUMP_RANK[classified["bump"]] > _BUMP_RANK[best]:
+            best = classified["bump"]
+    if best == "none" or not changes:
+        return {
+            "action": "skip",
+            "reason": "subject is not releasable",
+            "subject": tip_subject,
+        }
+    new_version = bump_version(version, best)
+    return {
+        "action": "publish",
+        "version": new_version,
+        "tag": f"v{new_version}",
+        "commit_subject": RELEASE_TITLE.format(version=new_version),
+        "bump": best,
+        "section": changes[-1]["section"],
+        "subject": changes[-1]["subject"],
+        "changes": changes,
+    }
 
 
-def maybe_update_plugin(root: Path, version: str) -> None:
-    path = root / ".claude-plugin" / "plugin.json"
-    if not path.is_file():
-        return
-    data = json.loads(path.read_text(encoding="utf-8"))
-    data["version"] = version
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+def decide(message: str, version: str, pr_title: str | None) -> dict:
+    """Choose skip or publish for one squash subject."""
+    return decide_unreleased([message], version, tip_title=pr_title)
 
 
-def apply_release(
-    root: Path,
-    message: str,
-    pr_title: str | None,
-    repo: str,
-    date: str,
-) -> dict:
-    types_doc = load_types(root / "scripts" / "commit-types.json")
-    assert_commitlint_matches(types_doc["types"], root / ".commitlintrc.json")
-    result = classify(message, pr_title, types_doc)
-    if result["bump"] == "none":
-        return result
-    version_path = root / ".version"
-    current = version_path.read_text(encoding="utf-8").strip()
-    nxt = bump_version(current, result["bump"])
-    changelog_path = root / "CHANGELOG.md"
-    rendered = render_changelog(
-        changelog_path.read_text(encoding="utf-8"),
-        nxt,
-        result,
-        repo,
-        date,
+_UNRELEASED = "## Unreleased"
+
+
+def _is_h2(line: str) -> bool:
+    """A changelog section heading. `###` does not match `## `."""
+    return line.startswith("## ")
+
+
+def _find_h2(lines: list[str], predicate) -> tuple[int, int] | None:
+    """Return the heading index and the index of the next h2, or the end."""
+    for index, line in enumerate(lines):
+        if predicate(line):
+            end = index + 1
+            while end < len(lines) and not _is_h2(lines[end]):
+                end += 1
+            return index, end
+    return None
+
+
+def _strip_edges(lines: list[str]) -> list[str]:
+    start = 0
+    end = len(lines)
+    while start < end and not lines[start].strip():
+        start += 1
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return lines[start:end]
+
+
+def _is_note(line: str) -> bool:
+    """A hand-written Unreleased line. Blank lines and `###` headings are not."""
+    text = line.strip()
+    return bool(text) and not text.startswith("###")
+
+
+def _has_entries(lines: list[str]) -> bool:
+    return any(_is_note(line) for line in lines)
+
+
+def _drop_span(lines: list[str], start: int, end: int) -> list[str]:
+    return lines[:start] + lines[end:]
+
+
+def _generated_body(changes: list[dict[str, str]]) -> list[str]:
+    """Commit subjects grouped by section. Order is first-seen, then encounter."""
+    grouped: dict[str, list[str]] = {}
+    for change in changes:
+        grouped.setdefault(change["section"], []).append(change["subject"])
+    blocks: list[str] = []
+    for section, subjects in grouped.items():
+        lines = [f"### {section}", ""]
+        lines.extend(f"* {subject}" for subject in subjects)
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks).splitlines()
+
+
+def _join_changelog(lines: list[str]) -> str:
+    text = "\n".join(lines).strip() + "\n"
+    return text
+
+
+def _unreleased_at_top(lines: list[str], notes: list[str]) -> list[str]:
+    """Put `## Unreleased` under the title, with `notes` when the next release owns them."""
+    span = _find_h2(lines, lambda line: line.strip() == _UNRELEASED)
+    if span is not None:
+        lines = _drop_span(lines, span[0], span[1])
+    if not lines or not lines[0].startswith("# "):
+        lines = ["# Changelog", *lines]
+    rest = lines[1:]
+    while rest and not rest[0].strip():
+        rest = rest[1:]
+    block = [_UNRELEASED, ""]
+    if notes:
+        block.extend(notes)
+        block.append("")
+    return [lines[0], "", *block, *rest]
+
+
+def _empty_unreleased_at_top(lines: list[str]) -> list[str]:
+    """Leave one empty `## Unreleased` immediately under the title."""
+    return _unreleased_at_top(lines, [])
+
+
+def prepend_changes(existing: str, version: str, changes: list[dict[str, str]], date: str) -> str:
+    """Insert one version section and consume `## Unreleased` into it.
+
+    Hand-written notes under Unreleased, bullets or prose, become the new
+    version body, with their `###` subsections kept in order. Those notes
+    replace the generated commit lines. An empty Unreleased section falls
+    back to the generated lines. The heading stays at the top. When the
+    version section is already present, its body stays as released and any
+    new notes stay under Unreleased for the next release.
+    """
+    lines = existing.splitlines()
+    span = _find_h2(lines, lambda line: line.strip() == _UNRELEASED)
+    notes: list[str] = []
+    if span is not None:
+        notes = _strip_edges(lines[span[0] + 1 : span[1]])
+        lines = _drop_span(lines, span[0], span[1])
+    use_notes = _has_entries(notes)
+    marker = f"## [{version}]"
+    version_span = _find_h2(lines, lambda line: line.startswith(marker))
+    if version_span is not None:
+        kept = notes if use_notes else []
+        return _join_changelog(_unreleased_at_top(lines, kept))
+    body = notes if use_notes else _generated_body(changes)
+    heading = f"## [{version}]({REPO_URL}/releases/tag/v{version}) ({date})"
+    if not lines or not lines[0].startswith("# "):
+        lines = ["# Changelog", *lines]
+    rest = lines[1:]
+    while rest and not rest[0].strip():
+        rest = rest[1:]
+    lines = [lines[0], "", heading, "", *body, "", *rest]
+    return _join_changelog(_empty_unreleased_at_top(lines))
+
+
+def prepend_changelog(existing: str, version: str, section: str, subject: str, date: str) -> str:
+    """Insert a keep-a-changelog style section under the title."""
+    return prepend_changes(existing, version, [{"section": section, "subject": subject}], date)
+
+
+def push_commands(decision: dict) -> list[Push]:
+    """Git and gh commands for a publish decision. The branch push is not a force-push."""
+    if decision["action"] != "publish":
+        return []
+    tag = decision["tag"]
+    return [
+        ["git", "push", "origin", "HEAD:main"],
+        ["git", "push", "origin", tag],
+        ["gh", "release", "create", tag, "--title", tag],
+    ]
+
+
+def _first_line(message: str) -> str:
+    lines = message.splitlines()
+    return lines[0].strip() if lines else ""
+
+
+def _description_opens(description: str) -> bool:
+    """True when the description starts with a cased letter or a digit.
+
+    A cased letter has upper and lower case forms, so ``OIDC`` and ``É``
+    pass and a caseless script such as CJK does not. ``2xx`` passes. A
+    symbol, or an empty description, does not. Conventional subjects are
+    expected to be ASCII.
+    """
+    if not description:
+        return False
+    first = description[0]
+    return first.islower() or first.isupper() or first.isdigit()
+
+
+def _fail(message: str) -> None:
+    raise SystemExit(message)
+
+
+def _check_types_match_commitlint() -> None:
+    commitlint = json.loads(COMMITLINT_PATH.read_text(encoding="utf-8"))
+    enum = commitlint["rules"]["type-enum"][2]
+    if type_names() != enum:
+        _fail(f"commit-types.json and .commitlintrc.json disagree: {type_names()} != {enum}")
+
+
+def _check_forbidden_pushes(text: str, label: str) -> None:
+    forbidden = (
+        "git push --force",
+        "git push -f",
+        "--force-with-lease",
+        "main --tags",
+        "git push origin --tags",
     )
-    version_path.write_text(nxt + "\n", encoding="utf-8")
-    changelog_path.write_text(rendered, encoding="utf-8")
-    bump_package_versions(root, nxt)
-    maybe_update_plugin(root, nxt)
-    result["next"] = nxt
-    return result
+    for snippet in forbidden:
+        if snippet in text:
+            _fail(f"{label} contains forbidden snippet: {snippet}")
+    for line in text.splitlines():
+        if "git push" in line and "--force" in line:
+            _fail(f"{label} force-pushes: {line.strip()}")
 
 
-def _write_fixture(root: Path, changelog: str, version: str = "0.2.0") -> None:
-    (root / "scripts").mkdir()
-    (root / "scripts" / "commit-types.json").write_text(
-        TYPES_PATH.read_text(encoding="utf-8"), encoding="utf-8"
+def _check_workflow_file() -> None:
+    if not WORKFLOW_PATH.is_file():
+        _fail(f"missing {WORKFLOW_PATH}")
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    _check_forbidden_pushes(text, "release workflow")
+    publish = (ROOT / "scripts" / "release_publish.py").read_text(encoding="utf-8")
+    _check_forbidden_pushes(publish, "release_publish.py")
+    if "permissions: {}" not in text.split("jobs:", 1)[0]:
+        _fail("release workflow must set permissions: {} before jobs")
+    if "contents: write" not in text:
+        _fail("release job must set contents: write")
+    if "pull-requests:" in text:
+        _fail("release workflow must not request pull-requests permission")
+    if "release-pr" in text or "_ensure_pr" in publish or "def publish_pr" in publish:
+        _fail("release pull request path is still present")
+    if '["git", "push", "origin", "HEAD:main"]' not in publish:
+        _fail("release_publish.py must push HEAD:main")
+
+
+def _check_pushes_are_safe() -> None:
+    decision = decide("✨ feat(api): stream a turn (#2)\n", "0.0.0", None)
+    commands = push_commands(decision)
+    saw_main = False
+    for argv in commands:
+        if "--force" in argv or "-f" in argv or "--tags" in argv or "--force-with-lease" in argv:
+            _fail(f"unsafe push: {argv}")
+        if argv == ["git", "push", "origin", "HEAD:main"]:
+            saw_main = True
+    if not saw_main:
+        _fail(f"publish does not push main: {commands}")
+    skipped = decide("🔖 chore(release): v0.1.0 (#3)\n", "0.1.0", None)
+    if push_commands(skipped):
+        _fail("a release subject must not push")
+
+
+def _expect(actual: object, expected: object, label: str) -> None:
+    if actual != expected:
+        _fail(f"{label}: {actual!r} != {expected!r}")
+
+
+def _check_decisions() -> None:
+    feat = decide("✨ feat(api): stream a turn (#2)\n", "0.0.0", None)
+    _expect(feat["action"], "publish", "feat action")
+    _expect(feat["version"], "0.1.0", "feat version")
+    _expect(feat["commit_subject"], "🔖 chore(release): v0.1.0", "feat title")
+    _expect(feat["bump"], "minor", "feat bump")
+
+    fix = decide("🐛 fix(api): close the stream\n", "0.1.0", None)
+    _expect(fix["bump"], "patch", "fix bump")
+    _expect(fix["version"], "0.1.1", "fix version")
+
+    below = decide("💥 feat(api)!: replace ids\n", "0.1.0", None)
+    _expect(below["bump"], "minor", "bang bump below 1.0")
+    _expect(below["version"], "0.2.0", "bang version below 1.0")
+    _expect(below["changes"][0]["section"], "Breaking changes", "bang section below 1.0")
+
+    footer = "✨ feat(api): change the envelope\n\nBREAKING CHANGE: error shape\n"
+    released = decide(footer, "1.0.0", None)
+    _expect(released["bump"], "major", "footer bump")
+    _expect(released["version"], "2.0.0", "footer version")
+    _expect(released["changes"][0]["section"], "Breaking changes", "footer section")
+    hyphen = "🐛 fix(api): change the envelope\n\nBREAKING-CHANGE: error shape\n"
+    _expect(decide(hyphen, "1.0.0", None)["bump"], "major", "hyphen footer bump")
+    prose = "👷 ci(release): note the marker\n\nThe body mentions `BREAKING CHANGE:` in prose.\n"
+    _expect(decide(prose, "0.6.1", None)["bump"], "patch", "prose is not a footer")
+
+    chore = decide("🎉 chore(repo): bootstrap the workspace\n", "0.0.0", None)
+    _expect(chore["bump"], "patch", "chore bump")
+    _expect(chore["version"], "0.0.1", "chore version")
+
+    skipped = decide("update readme\n", "0.0.0", None)
+    _expect(skipped["action"], "skip", "skip action")
+
+    release_commit = decide("🔖 chore(release): v0.1.0 (#9)\n", "0.1.0", None)
+    _expect(release_commit["action"], "skip", "release commit action")
+    _expect(release_commit["subject"], "chore(release): v0.1.0", "release commit subject")
+
+    merge = "Merge pull request #4 from melroyanthony/feat/x\n\n✨ feat(api): stream a turn\n"
+    _expect(decide(merge, "0.0.0", None)["version"], "0.1.0", "merge version")
+    titled = decide(merge, "0.0.0", "🐛 fix(api): close the stream")
+    _expect(titled["bump"], "patch", "pr title wins")
+    _expect(pr_number(merge), "4", "merge pr number")
+    _expect(pr_number("✨ feat(api): stream a turn (#2)"), "2", "suffix pr number")
+
+    # The old release PR looked only at #24's perf subject and opened v0.2.2.
+    # Since v0.2.1 the unreleased commits are that feat and that perf. Minor wins.
+    perf_only = decide(
+        "⚡️ perf(llm): reuse one http client for model streams (#24)\n",
+        "0.2.1",
+        None,
     )
-    (root / ".commitlintrc.json").write_text(
-        COMMITLINT_PATH.read_text(encoding="utf-8"), encoding="utf-8"
+    _expect(perf_only["version"], "0.2.2", "perf alone is a patch")
+    unreleased = decide_unreleased(
+        [
+            "✨ feat(turns): stream a chat turn with an inline agent (#22)\n",
+            "⚡️ perf(llm): reuse one http client for model streams (#24)\n",
+        ],
+        "0.2.1",
     )
-    (root / ".version").write_text(version + "\n", encoding="utf-8")
-    (root / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
-    (root / "Cargo.toml").write_text(
-        '[package]\nname = "x"\nversion = "0.2.0"\n',
-        encoding="utf-8",
+    _expect(unreleased["action"], "publish", "unreleased action")
+    _expect(unreleased["bump"], "minor", "feat outranks perf")
+    _expect(unreleased["version"], "0.3.0", "first direct release")
+    _expect(unreleased["commit_subject"], "🔖 chore(release): v0.3.0", "v0.3.0 subject")
+    _expect(
+        [item["subject"] for item in unreleased["changes"]],
+        [
+            "feat(turns): stream a chat turn with an inline agent",
+            "perf(llm): reuse one http client for model streams",
+        ],
+        "both unreleased subjects",
     )
-    (root / "pyproject.toml").write_text(
-        '[project]\nname = "x"\nversion = "0.2.0"\n',
-        encoding="utf-8",
+    again = decide_unreleased(
+        [
+            "✨ feat(turns): stream a chat turn with an inline agent (#22)\n",
+            "⚡️ perf(llm): reuse one http client for model streams (#24)\n",
+            "🔖 chore(release): v0.3.0\n",
+        ],
+        "0.2.1",
     )
+    _expect(again["action"], "skip", "release tip does not bump again")
+    # This pull request's own merge is a ci commit on top of those two.
+    # Patch does not lower the minor, so the first publish is still v0.3.0.
+    with_ci = decide_unreleased(
+        [
+            "✨ feat(turns): stream a chat turn with an inline agent (#22)\n",
+            "⚡️ perf(llm): reuse one http client for model streams (#24)\n",
+            "👷 ci(release): publish releases directly from main (#26)\n",
+        ],
+        "0.2.1",
+    )
+    _expect(with_ci["version"], "0.3.0", "ci commit keeps v0.3.0")
+    _expect(with_ci["bump"], "minor", "ci does not lower the bump")
+    _expect(len(with_ci["changes"]), 3, "ci commit is in the changelog")
+    _check_two_unreleased_commits_render_both_entries()
+    _check_highest_bump_skips_a_middle_release_commit()
+    _check_uppercase_or_digit_description()
+    _check_v0_43_0_range_publishes_v0_44_0()
+
+
+def _git(cwd: Path, *args: str) -> str:
+    env = os.environ.copy()
+    env["GIT_AUTHOR_NAME"] = "release-test"
+    env["GIT_AUTHOR_EMAIL"] = "release-test@example.com"
+    env["GIT_COMMITTER_NAME"] = "release-test"
+    env["GIT_COMMITTER_EMAIL"] = "release-test@example.com"
+    result = subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return result.stdout.strip()
+
+
+def _check_a_commit_landed_before_tagging_is_listed() -> None:
+    """HEAD stays on the triggering push. The later main tip is what gets tagged."""
+    with tempfile.TemporaryDirectory() as raw:
+        cwd = Path(raw)
+        _git(cwd, "init", "-b", "main")
+        _git(cwd, "commit", "--allow-empty", "-m", "🎉 chore(repo): bootstrap the workspace")
+        _git(cwd, "tag", "v0.1.0")
+        _git(cwd, "commit", "--allow-empty", "-m", "⬆️ build(deps): bump the uv group with 2 updates (#149)")
+        _git(cwd, "commit", "--allow-empty", "-m", "⬆️ build(deps): bump the npm group with 4 updates (#150)")
+        _git(cwd, "checkout", "--detach", "HEAD~1")
+        stale = [item["subject"] for item in classify_tip("0.1.0", "HEAD", cwd)["changes"]]
+        fresh = classify_tip("0.1.0", "main", cwd)
+        _expect(stale, ["build(deps): bump the uv group with 2 updates"], "checkout range misses npm")
+        _expect(
+            [item["subject"] for item in fresh["changes"]],
+            [
+                "build(deps): bump the uv group with 2 updates",
+                "build(deps): bump the npm group with 4 updates",
+            ],
+            "origin tip lists the commit merged before tagging",
+        )
+        rendered = prepend_changes("# Changelog\n\n", fresh["version"], fresh["changes"], "2026-10-30")
+        if "* build(deps): bump the npm group with 4 updates" not in rendered:
+            _fail(f"npm bump missing from the release that would tag main:\n{rendered}")
+
+
+ISSUE_159_SUBJECT = (
+    "✨ feat(auth): OIDC login, session cookies, CSRF and web sign-in (#59) (#159)"
+)
+THIS_FIX_SUBJECT = "🐛 fix(release): accept uppercase or digit subject starts (#168)"
+
+
+def _check_uppercase_or_digit_description() -> None:
+    """A description may start with a cased letter or a digit.
+
+    The type, an optional scope, and a non-empty description are still required.
+    """
+    decision = decide(ISSUE_159_SUBJECT + "\n", "0.43.0", None)
+    _expect(decision["action"], "publish", "issue 159 action")
+    _expect(decision["bump"], "minor", "issue 159 bump")
+    _expect(decision["version"], "0.44.0", "issue 159 version")
+    _expect(decision["changes"][0]["section"], "Features", "issue 159 section")
+    classified = classify(
+        "feat(auth): OIDC login, session cookies, CSRF and web sign-in (#59)",
+        "",
+        "0.43.0",
+    )
+    _expect(classified["type"], "feat", "issue 159 type")
+    _expect(classified["bump"], "minor", "issue 159 classified bump")
+    _expect(classify("fix(api): 2xx body kept", "", "0.43.0")["bump"], "patch", "digit description")
+    _expect(classify("OIDC login stuff", "", "0.43.0")["bump"], "none", "subject without a type")
+    _expect(classify("feat(Auth): lower", "", "0.43.0")["bump"], "none", "uppercase scope")
+    _expect(classify("nope(auth): lower", "", "0.43.0")["bump"], "none", "unknown type")
+    _expect(classify("feat(auth):", "", "0.43.0")["bump"], "none", "empty description")
+
+
+def _check_v0_43_0_range_publishes_v0_44_0() -> None:
+    """Commits after v0.43.0 include #159 and this fix. Minor wins over patch."""
+    before = _workspace_tags()
+    with tempfile.TemporaryDirectory() as raw:
+        cwd = Path(raw)
+        _git(cwd, "init", "-b", "main")
+        _git(cwd, "commit", "--allow-empty", "-m", "🔖 chore(release): v0.43.0")
+        _git(cwd, "tag", "v0.43.0")
+        _git(cwd, "commit", "--allow-empty", "-m", ISSUE_159_SUBJECT)
+        _git(cwd, "commit", "--allow-empty", "-m", THIS_FIX_SUBJECT)
+        decision = classify_tip("0.43.0", "HEAD", cwd)
+    if _workspace_tags() != before:
+        _fail("workspace tags were created, moved, or deleted")
+    _expect(decision["action"], "publish", "v0.43.0 range action")
+    _expect(decision["bump"], "minor", "feat outranks this fix")
+    _expect(decision["version"], "0.44.0", "next release after v0.43.0")
+    if decision["version"] == "0.43.1":
+        _fail("the fix was classified alone and hid #159")
+    _expect(
+        [item["subject"] for item in decision["changes"]],
+        [
+            "feat(auth): OIDC login, session cookies, CSRF and web sign-in",
+            "fix(release): accept uppercase or digit subject starts",
+        ],
+        "both commits since v0.43.0",
+    )
+    rendered = prepend_changes("# Changelog\n\n", decision["version"], decision["changes"], "2026-11-01")
+    for subject in (
+        "feat(auth): OIDC login, session cookies, CSRF and web sign-in",
+        "fix(release): accept uppercase or digit subject starts",
+    ):
+        if f"* {subject}" not in rendered:
+            _fail(f"changelog missed {subject}:\n{rendered}")
+    if "v0.43.1" in rendered:
+        _fail(f"changelog used a patch version:\n{rendered}")
+
+
+def _workspace_tags() -> str:
+    result = subprocess.run(
+        ["git", "tag", "--list"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def _check_two_unreleased_commits_render_both_entries() -> None:
+    """Two commits after the last tag both land in the changelog."""
+    decision = decide_unreleased(
+        [
+            "📝 docs(deploy): note the bind\n",
+            "🐛 fix(api): keep the owner check\n",
+        ],
+        "0.42.3",
+    )
+    _expect(decision["action"], "publish", "two commits publish")
+    _expect(decision["bump"], "patch", "docs and fix stay patch")
+    _expect(decision["version"], "0.42.4", "one patch for both commits")
+    rendered = prepend_changes("# Changelog\n\n", decision["version"], decision["changes"], "2026-10-30")
+    if "* docs(deploy): note the bind" not in rendered or "* fix(api): keep the owner check" not in rendered:
+        _fail(f"both changelog entries were not rendered:\n{rendered}")
+
+
+def _check_highest_bump_skips_a_middle_release_commit() -> None:
+    """A release commit in the range is omitted. The highest remaining bump wins."""
+    decision = decide_unreleased(
+        [
+            "🔖 chore(release): v0.41.0\n",
+            "🔧 chore(deps): ignore odd majors\n",
+            "✨ feat(auth): add a service key\n",
+            "🐛 fix(auth): compare digests\n",
+        ],
+        "0.41.0",
+    )
+    _expect(decision["bump"], "minor", "feat outranks chore and fix")
+    _expect(decision["version"], "0.42.0", "minor from 0.41.0")
+    _expect(
+        [item["subject"] for item in decision["changes"]],
+        [
+            "chore(deps): ignore odd majors",
+            "feat(auth): add a service key",
+            "fix(auth): compare digests",
+        ],
+        "release commit is not a changelog entry",
+    )
+
+
+def _check_changelog() -> None:
+    rendered = prepend_changelog("# Changelog\n\nIntro.\n", "0.1.0", "Features", "feat(api): stream a turn", "2026-10-21")
+    if "## [0.1.0]" not in rendered or "* feat(api): stream a turn" not in rendered:
+        _fail(f"changelog render missed the entry:\n{rendered}")
+    if not rendered.startswith("# Changelog\n"):
+        _fail("changelog title was not preserved")
+    again = prepend_changelog(rendered, "0.1.0", "Features", "feat(api): stream a turn", "2026-10-21")
+    if again.count("## [0.1.0]") != 1:
+        _fail("changelog prepend was not idempotent")
+    combined = prepend_changes(
+        "# Changelog\n\n",
+        "0.3.0",
+        [
+            {"section": "Features", "subject": "feat(turns): stream a chat turn with an inline agent"},
+            {"section": "Performance", "subject": "perf(llm): reuse one http client for model streams"},
+        ],
+        "2026-10-21",
+    )
+    if "### Features\n\n* feat(turns):" not in combined or "### Performance\n\n* perf(llm):" not in combined:
+        _fail(f"combined changelog missed a section:\n{combined}")
+    split = prepend_changes(
+        "# Changelog\n\n",
+        "0.4.0",
+        [
+            {"section": "Features", "subject": "feat(api): first"},
+            {"section": "Bug Fixes", "subject": "fix(api): middle"},
+            {"section": "Features", "subject": "feat(api): second"},
+        ],
+        "2026-10-21",
+    )
+    if split.count("### Features") != 1 or split.count("### Bug Fixes") != 1:
+        _fail(f"non-adjacent sections were not grouped:\n{split}")
+    features, fixes = split.split("### Bug Fixes", 1)
+    if features.find("feat(api): first") > features.find("feat(api): second"):
+        _fail(f"subjects inside a section lost encounter order:\n{split}")
+    if "fix(api): middle" not in fixes or split.find("### Features") > split.find("### Bug Fixes"):
+        _fail(f"section order did not follow first appearance:\n{split}")
+    _check_unreleased_is_consumed()
+    _check_empty_unreleased_is_idempotent()
+    _check_prose_unreleased_is_consumed()
+    _check_rerun_keeps_released_body_and_new_notes()
+    _check_changelog_keeps_empty_unreleased()
+
+
+def _check_unreleased_is_consumed() -> None:
+    """Notes in more than one subsection move into the new version."""
+    source = """# Changelog
+
+## Unreleased
+
+### Features
+
+* hand written feature
+
+### Security
+
+* hand written security note
+
+## [0.1.0](https://github.com/melroyanthony/hangar/releases/tag/v0.1.0) (2026-01-01)
+
+### Bug Fixes
+
+* fix(api): older
+"""
+    rendered = prepend_changes(
+        source,
+        "0.2.0",
+        [{"section": "Features", "subject": "feat(api): generic"}],
+        "2026-11-03",
+    )
+    if not rendered.startswith("# Changelog\n\n## Unreleased\n\n## [0.2.0]"):
+        _fail(f"empty Unreleased was not left above the new version:\n{rendered}")
+    if "* hand written feature" not in rendered or "* hand written security note" not in rendered:
+        _fail(f"unreleased subsections were not kept:\n{rendered}")
+    if "feat(api): generic" in rendered:
+        _fail(f"generated line was added beside hand-written notes:\n{rendered}")
+    if rendered.index("### Features") > rendered.index("### Security"):
+        _fail(f"subsection order changed:\n{rendered}")
+    if rendered.index("## [0.2.0]") > rendered.index("## [0.1.0]"):
+        _fail(f"older version was not left below the new one:\n{rendered}")
+    again = prepend_changes(
+        rendered,
+        "0.2.0",
+        [{"section": "Features", "subject": "feat(api): generic"}],
+        "2026-11-03",
+    )
+    if again != rendered:
+        _fail(f"consuming Unreleased was not idempotent:\n{again}")
+
+
+def _check_empty_unreleased_is_idempotent() -> None:
+    """No hand-written notes means the generated lines are used once."""
+    source = """# Changelog
+
+## Unreleased
+
+## [0.1.0](https://github.com/melroyanthony/hangar/releases/tag/v0.1.0) (2026-01-01)
+
+### Bug Fixes
+
+* fix(api): older
+"""
+    rendered = prepend_changes(
+        source,
+        "0.2.0",
+        [{"section": "Bug Fixes", "subject": "fix(api): generic"}],
+        "2026-11-03",
+    )
+    if "* fix(api): generic" not in rendered or "* fix(api): older" not in rendered:
+        _fail(f"empty Unreleased did not fall back to generated lines:\n{rendered}")
+    if not rendered.startswith("# Changelog\n\n## Unreleased\n\n## [0.2.0]"):
+        _fail(f"empty Unreleased was not kept at the top:\n{rendered}")
+    again = prepend_changes(
+        rendered,
+        "0.2.0",
+        [{"section": "Bug Fixes", "subject": "fix(api): generic"}],
+        "2026-11-03",
+    )
+    if again != rendered:
+        _fail(f"empty Unreleased release was not idempotent:\n{again}")
+
+
+def _check_changelog_keeps_empty_unreleased() -> None:
+    """This library's changelog keeps an empty Unreleased section above 0.2.0."""
+    on_disk = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    if not on_disk.startswith("# Changelog\n\n## Unreleased\n\n## [0.2.0]"):
+        _fail("CHANGELOG.md does not keep an empty Unreleased above 0.2.0")
+
+
+def _check_prose_unreleased_is_consumed() -> None:
+    """A note with no bullet is kept, not replaced by the generated line."""
+    source = "# Changelog\n\n## Unreleased\n\nA prose note with no bullet.\n"
+    rendered = prepend_changes(
+        source,
+        "0.2.0",
+        [{"section": "Features", "subject": "feat(api): generic"}],
+        "2026-11-03",
+    )
+    if "feat(api): generic" in rendered:
+        _fail(f"generated line replaced a prose note:\n{rendered}")
+    version = rendered.split("## [0.2.0]", 1)[-1]
+    if "A prose note with no bullet." not in version:
+        _fail(f"prose note was not consumed into the new version:\n{rendered}")
+    if "A prose note with no bullet." in rendered.split("## [0.2.0]", 1)[0]:
+        _fail(f"prose note stayed under Unreleased:\n{rendered}")
+
+
+def _check_rerun_keeps_released_body_and_new_notes() -> None:
+    """A second call for a published version does not rewrite that section."""
+    source = """# Changelog
+
+## [0.2.0](https://github.com/melroyanthony/hangar/releases/tag/v0.2.0) (2026-11-03)
+
+### Features
+
+* released note
+
+## Unreleased
+
+* a new note
+"""
+    rendered = prepend_changes(
+        source,
+        "0.2.0",
+        [{"section": "Features", "subject": "feat(api): generic"}],
+        "2026-11-03",
+    )
+    if "feat(api): generic" in rendered:
+        _fail(f"re-run wrote a generated line into a released version:\n{rendered}")
+    before, after = rendered.split("## [0.2.0]", 1)
+    if "* a new note" not in before:
+        _fail(f"new note was not kept under Unreleased:\n{rendered}")
+    if "* released note" not in after:
+        _fail(f"released body was rewritten:\n{rendered}")
+    if "* a new note" in after.split("## [", 1)[0]:
+        _fail(f"new note was copied into the released section:\n{rendered}")
 
 
 def self_test() -> None:
-    types_doc = load_types()
-    assert_commitlint_matches(types_doc["types"])
-
-    def expect(message: str, bump: str, subject: str, pr_title: str | None = None) -> None:
-        got = classify(message, pr_title, types_doc)
-        if got["bump"] != bump or got["subject"] != subject:
-            raise ReleaseError(f"{message!r} -> {got}, want bump={bump} subject={subject}")
-
-    expect(
-        "✨ feat(core): add reversible pii placeholders",
-        "minor",
-        "feat(core): add reversible pii placeholders",
-    )
-    expect(
-        "🐛 fix(api): reject an empty prompt\n\nwhy\n", "patch", "fix(api): reject an empty prompt"
-    )
-    expect("feat(api): add a route (#12)", "minor", "feat(api): add a route")
-    expect(
-        "Merge pull request #4 from melroyanthony/cursor/example\n\n✨ feat(core): stream tokens\n",
-        "minor",
-        "feat(core): stream tokens",
-    )
-    expect(
-        "✨ feat(core): keep the old title\n",
-        "minor",
-        "feat(core): prefer the pull request title",
-        pr_title="✨ feat(core): prefer the pull request title",
-    )
-    expect("💥 feat(api)!: drop the v0 response", "major", "feat(api)!: drop the v0 response")
-    expect(
-        "🐛 fix(core): rename a field\n\nBREAKING CHANGE: clients must send text\n",
-        "major",
-        "fix(core): rename a field",
-    )
-    expect("🔧 chore(release): v0.3.0", "none", "chore(release): v0.3.0")
-    expect("🔖 chore(release): v0.3.0", "none", "chore(release): v0.3.0")
-    expect("hello there", "none", "hello there")
-    expect("⬆️ deps: bump pydantic", "patch", "deps: bump pydantic")
-
-    if pr_number("✨ feat(core): add it (#9)\n") != "9":
-        raise ReleaseError("pr number missed squash trailer")
-    if pr_number("Merge pull request #15 from melroyanthony/x\n") != "15":
-        raise ReleaseError("pr number missed merge commit")
-    if bump_version("0.2.0", "minor") != "0.3.0":
-        raise ReleaseError("minor bump")
-    if bump_version("0.2.9", "patch") != "0.2.10":
-        raise ReleaseError("patch bump")
-    if bump_version("1.4.2", "major") != "2.0.0":
-        raise ReleaseError("major bump")
-
-    base = (
-        "# Changelog\n\nNotes stay above.\n\n"
-        "## Unreleased\n\n### Fixed\n\n"
-        "* fix(api): keep the handwritten note\n\n"
-        "## [0.2.0](https://example/releases/tag/v0.2.0) (2026-02-17)\n\n"
-        "### Added\n\n* prior\n"
-    )
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        _write_fixture(root, base)
-        result = apply_release(
-            root,
-            "🐛 fix(api): this subject must not replace the note\n",
-            None,
-            "https://github.com/melroyanthony/llm-guardrails",
-            "2026-11-04",
-        )
-        if result["next"] != "0.2.1":
-            raise ReleaseError(f"expected 0.2.1, got {result}")
-        text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
-        if not text.startswith("# Changelog\n"):
-            raise ReleaseError("preamble dropped")
-        if "## Unreleased\n" not in text.split("## [0.2.1]")[0]:
-            raise ReleaseError("empty Unreleased section missing at top")
-        unreleased_body = text.split("## Unreleased\n", 1)[1].split("## [0.2.1]", 1)[0]
-        if unreleased_body.strip():
-            raise ReleaseError(f"Unreleased was not emptied: {unreleased_body!r}")
-        if "keep the handwritten note" not in text.split("## [0.2.0]")[0]:
-            raise ReleaseError("handwritten Unreleased notes were not consumed")
-        if "must not replace the note" in text:
-            raise ReleaseError("subject bullet duplicated handwritten notes")
-        if (root / ".version").read_text(encoding="utf-8").strip() != "0.2.1":
-            raise ReleaseError(".version not updated")
-        if 'version = "0.2.1"' not in (root / "Cargo.toml").read_text(encoding="utf-8"):
-            raise ReleaseError("Cargo.toml version was not bumped")
-        if 'version = "0.2.1"' not in (root / "pyproject.toml").read_text(encoding="utf-8"):
-            raise ReleaseError("pyproject.toml version was not bumped")
-        notes = notes_for_version(text, "0.2.1")
-        if "handwritten note" not in notes:
-            raise ReleaseError("notes extractor missed the new section")
-
-        plugin_dir = root / ".claude-plugin"
-        plugin_dir.mkdir()
-        (plugin_dir / "plugin.json").write_text(
-            '{"name": "x", "version": "0.0.0"}\n', encoding="utf-8"
-        )
-        (root / "CHANGELOG.md").write_text(
-            "# Changelog\n\n## Unreleased\n\n"
-            "## [0.2.1](https://example/releases/tag/v0.2.1) (2026-11-04)\n\n"
-            "* old\n",
-            encoding="utf-8",
-        )
-        (root / ".version").write_text("0.2.1\n", encoding="utf-8")
-        empty = apply_release(
-            root,
-            "✨ feat(core): synthesise a bullet when unreleased is empty\n",
-            None,
-            DEFAULT_REPO,
-            "2026-11-04",
-        )
-        if empty["next"] != "0.3.0":
-            raise ReleaseError("empty unreleased should still bump feat to minor")
-        rendered = (root / "CHANGELOG.md").read_text(encoding="utf-8")
-        if "* feat(core): synthesise a bullet when unreleased is empty" not in rendered:
-            raise ReleaseError("empty Unreleased did not synthesise a bullet")
-        plugin = json.loads((plugin_dir / "plugin.json").read_text(encoding="utf-8"))
-        if plugin["version"] != "0.3.0":
-            raise ReleaseError("plugin.json version was not rewritten")
-
-        try:
-            render_changelog(
-                "# Changelog\n\nNo unreleased heading.\n",
-                "0.0.1",
-                empty,
-                DEFAULT_REPO,
-                "2026-11-04",
-            )
-        except ReleaseError:
-            pass
-        else:
-            raise ReleaseError("missing Unreleased heading should fail")
-
+    """Run the classifier contract and the workflow safety checks."""
+    _check_types_match_commitlint()
+    _check_workflow_file()
+    _check_pushes_are_safe()
+    _check_decisions()
+    _check_changelog()
+    _check_a_commit_landed_before_tagging_is_listed()
     print("release_subject.py self-test ok")
 
 
-def _read_message(path: str | None) -> str:
-    if path:
-        return Path(path).read_text(encoding="utf-8")
+def latest_version_tag(cwd: Path | None = None) -> str | None:
+    """Return the highest ``vX.Y.Z`` tag, or None when the repo has no release tag."""
+    result = subprocess.run(
+        ["git", "tag", "--list", "v*", "--sort=-v:refname"],
+        cwd=cwd or ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    for line in result.stdout.splitlines():
+        if re.fullmatch(r"v\d+\.\d+\.\d+", line.strip()):
+            return line.strip()
+    return None
+
+
+def commit_messages_since(tag: str | None, rev: str = "HEAD", cwd: Path | None = None) -> list[str]:
+    """Return full commit messages after ``tag`` up to ``rev``, oldest first.
+
+    ``tag is None`` is every commit reachable from ``rev``. The release job
+    passes ``origin/main``: that is the parent of the commit about to be tagged.
+    ``HEAD`` stays on the push that started the workflow.
+    """
+    revision = rev if tag is None else f"{tag}..{rev}"
+    result = subprocess.run(
+        ["git", "log", "--reverse", "--format=%x1e%B", revision],
+        cwd=cwd or ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return [part.strip("\n") for part in result.stdout.split("\x1e") if part.strip()]
+
+
+def classify_tip(version: str, rev: str = "HEAD", cwd: Path | None = None) -> dict:
+    """Decide the release for ``last tag..rev`` and record that tip."""
+    root = cwd or ROOT
+    decision = decide_unreleased(commit_messages_since(latest_version_tag(root), rev, root), version)
+    tip = subprocess.check_output(["git", "rev-parse", rev], cwd=root, text=True).strip()
+    decision["tip"] = tip
+    return decision
+
+
+def _read_message(args: argparse.Namespace) -> str:
+    if args.message is not None:
+        return args.message
+    if args.message_file is not None:
+        return Path(args.message_file).read_text(encoding="utf-8")
     return sys.stdin.read()
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--pr-number", action="store_true")
+    parser.add_argument("--decide", action="store_true")
+    parser.add_argument("--version")
+    parser.add_argument("--version-file")
+    parser.add_argument("--message")
     parser.add_argument("--message-file")
-    parser.add_argument("--version", help="current MAJOR.MINOR.PATCH, from .version")
-    parser.add_argument("--pr-title", default=None)
-    parser.add_argument("--pr-title-file")
-    parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--notes-for", help="print the changelog body for VERSION")
-    parser.add_argument("--repo", default=DEFAULT_REPO)
-    parser.add_argument("--date", default=dt.date.today().isoformat())
-    parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--github-output", help="append bump and next to this file")
-    args = parser.parse_args(argv)
+    parser.add_argument("--pr-title", default="")
+    parser.add_argument(
+        "--since-tag",
+        action="store_true",
+        help="Decide from commits after the highest vX.Y.Z tag",
+    )
+    parser.add_argument(
+        "--rev",
+        default="HEAD",
+        help="Tip of the range. The release job uses origin/main, the commit it tags.",
+    )
+    return parser
 
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point."""
+    args = _build_parser().parse_args(argv)
     if args.self_test:
         self_test()
         return 0
-
-    if args.notes_for:
-        text = (args.root / "CHANGELOG.md").read_text(encoding="utf-8")
-        sys.stdout.write(notes_for_version(text, args.notes_for))
+    if args.decide and args.since_tag:
+        version = args.version
+        if args.version_file:
+            version = Path(args.version_file).read_text(encoding="utf-8")
+        if not version:
+            _fail("--decide needs --version or --version-file")
+        decision = classify_tip(version, args.rev)
+        print(json.dumps(decision))
         return 0
-
-    message = _read_message(args.message_file)
-    pr_title = args.pr_title
-    if args.pr_title_file:
-        loaded = Path(args.pr_title_file).read_text(encoding="utf-8").strip()
-        pr_title = loaded or None
+    message = _read_message(args)
     if args.pr_number:
-        print(pr_number(message))
+        number = pr_number(message)
+        if number:
+            print(number)
         return 0
-
-    if not args.version and not args.apply:
-        parser.error("--version is required unless --self-test, --pr-number, or --notes-for")
-
-    types_doc = load_types(args.root / "scripts" / "commit-types.json")
-    assert_commitlint_matches(types_doc["types"], args.root / ".commitlintrc.json")
-    if args.apply:
-        result = apply_release(args.root, message, pr_title, args.repo, args.date)
-        current = (args.root / ".version").read_text(encoding="utf-8").strip()
-        nxt = result.get("next", "")
-    else:
-        result = classify(message, pr_title, types_doc)
-        current = args.version.strip()
-        nxt = "" if result["bump"] == "none" else bump_version(current, result["bump"])
-        result["next"] = nxt
-
-    print(f"bump={result['bump']}")
-    print(f"next={result.get('next', nxt)}")
-    print(f"subject={result['subject']}")
-    if args.github_output:
-        with Path(args.github_output).open("a", encoding="utf-8") as handle:
-            handle.write(f"bump={result['bump']}\n")
-            handle.write(f"next={result.get('next', nxt)}\n")
-            handle.write(f"subject={result['subject']}\n")
-    return 0
+    if args.decide:
+        version = args.version
+        if args.version_file:
+            version = Path(args.version_file).read_text(encoding="utf-8")
+        if not version:
+            _fail("--decide needs --version or --version-file")
+        decision = decide(message, version, args.pr_title or None)
+        print(json.dumps(decision))
+        return 0
+    _fail("pass --self-test, --pr-number, or --decide")
+    return 2
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except ReleaseError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
+    raise SystemExit(main())

@@ -1,47 +1,17 @@
 {
   "types": [
-    "feat",
-    "fix",
-    "docs",
-    "style",
-    "refactor",
-    "perf",
-    "test",
-    "build",
-    "ci",
-    "chore",
-    "deps",
-    "security",
-    "revert"
-  ],
-  "minor": ["feat"],
-  "patch": [
-    "fix",
-    "docs",
-    "style",
-    "refactor",
-    "perf",
-    "test",
-    "build",
-    "ci",
-    "chore",
-    "deps",
-    "security",
-    "revert"
-  ],
-  "emoji": {
-    "feat": "✨",
-    "fix": "🐛",
-    "docs": "📝",
-    "style": "🎨",
-    "refactor": "♻️",
-    "perf": "⚡️",
-    "test": "✅",
-    "build": "📦",
-    "ci": "👷",
-    "chore": "🔧",
-    "deps": "⬆️",
-    "security": "🔒️",
-    "revert": "⏪️"
-  }
+    {"name": "feat", "bump": "minor", "section": "Features"},
+    {"name": "fix", "bump": "patch", "section": "Bug Fixes"},
+    {"name": "docs", "bump": "patch", "section": "Documentation"},
+    {"name": "style", "bump": "patch", "section": "Style"},
+    {"name": "refactor", "bump": "patch", "section": "Refactoring"},
+    {"name": "perf", "bump": "patch", "section": "Performance"},
+    {"name": "test", "bump": "patch", "section": "Testing"},
+    {"name": "build", "bump": "patch", "section": "Build"},
+    {"name": "ci", "bump": "patch", "section": "CI/CD"},
+    {"name": "chore", "bump": "patch", "section": "Miscellaneous"},
+    {"name": "revert", "bump": "patch", "section": "Reverts"},
+    {"name": "security", "bump": "patch", "section": "Security"},
+    {"name": "deps", "bump": "patch", "section": "Dependencies"}
+  ]
 }
