@@ -164,7 +164,7 @@ Publishing a wheel to PyPI is not wired up.
 
 GitHub Actions, on pull requests and on pushes to `main`:
 
-- `CI` runs ruff, pytest on Python 3.11 and 3.14, and `cargo fmt`, clippy, and `cargo test`
+- `CI` runs ruff, mypy on `llm_guardrails/`, pytest on Python 3.11 and 3.14, and `cargo fmt`, clippy, and `cargo test`
 - `Security` runs cargo-deny and pip-audit
 - `CodeQL` analyses Python and Rust with `build-mode: none`
 - `Release` runs on a push to `main`. It commits `.version` and `CHANGELOG.md`, pushes that commit to `main` without `--force`, then pushes the tag. It does not publish a wheel. See [RELEASING.md](RELEASING.md)
@@ -186,7 +186,9 @@ What the library actually does:
   every title-case pair or every date. `PIIRedactor` and `GuardrailsPipeline`
   take `allow_entities` and `deny_entities` (pipeline: `pii_allow_entities`,
   `pii_deny_entities`). An empty allow list raises `ValueError`, and so does
-  a label that is not one of those seven. Restoration is a straight string
+  a label that is not one of those seven. On `PIIRedactor` those two attributes
+  are read-only after construction: assigning them raises `AttributeError`.
+  Restoration is a straight string
   replace of the placeholders.
 - **Injection.** Eight regular expressions (`ignore_previous`, `reveal_system_prompt`,
   `role_play_attack`, `developer_mode`, `encoding_evasion`, `do_anything_now`,

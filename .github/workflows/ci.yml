@@ -61,6 +61,9 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check .
 
+      - name: Type check
+        run: uv run mypy llm_guardrails
+
       - name: Pytest
         run: uv run pytest
 

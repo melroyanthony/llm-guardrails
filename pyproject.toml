@@ -39,6 +39,7 @@ api = [
 [dependency-groups]
 dev = [
     "httpx>=0.27,<1",
+    "mypy>=2.4.1,<3",
     "pytest>=9.0.3,<10",
     "ruff>=0.4,<1.0",
 ]
@@ -68,3 +69,10 @@ ignore = ["S101"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["llm_guardrails"]
+show_error_codes = true
+warn_unused_ignores = true
+warn_redundant_casts = true
