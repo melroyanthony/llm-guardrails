@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.2.4](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.4) (2026-11-04)
+
+### Build
+
+* build(deps): bump the cargo group with 4 updates
+
 ## [0.2.3](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.3) (2026-11-04)
 
 ### Bug Fixes
