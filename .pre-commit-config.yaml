@@ -37,4 +37,4 @@ repos:
         entry: cargo clippy --all-targets -- -D warnings
         language: system
         pass_filenames: false
-        always_run: true
+        stages: [pre-push]

@@ -21,7 +21,7 @@ We will acknowledge a report within 3 business days. We will keep you informed w
 
 | Version | Supported |
 | --- | --- |
-| Latest 0.2 release | Yes |
+| the latest release | Yes |
 | Older releases | No |
 
-Security fixes land on the latest 0.2 release.
+Security fixes land on the latest release.
