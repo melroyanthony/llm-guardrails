@@ -1,0 +1,12 @@
+---
+description: Secrets and safety claims
+globs: "**/*.{py,rs,yml,yaml,json,toml,md}"
+alwaysApply: false
+---
+
+Follow `AGENTS.md` § Security.
+
+- No secrets in code, fixtures, workflows, or logs.
+- No `eval` of model output.
+- Do not describe the regex guards as a complete injection, bias, hallucination, HIPAA, or GDPR control.
+- The output validator checks top-level JSON `type` and `required` only.

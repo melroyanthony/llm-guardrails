@@ -1,282 +1,221 @@
 # LLM Guardrails
 
-**Responsible AI toolkit for LLM applications -- Rust-powered, Python-friendly**
+A Python library that redacts PII, scores prompts for injection patterns, scores model
+output for a few bias patterns, and checks that output against a small set of rules.
+The checks run in Rust and are called from Python through PyO3. A FastAPI app in `api/`
+demonstrates the pipeline. It does not call a model.
 
-A production-grade library that wraps any LLM call with pre- and post-processing guardrails for PII protection, prompt-injection defence, bias detection, and output validation. Core guardrail logic is implemented in **Rust** (via PyO3) for high-performance regex processing, exposed through an idiomatic Python API.
+## ⚡ Stack
 
----
+- 🦀 Rust on the stable toolchain in `rust-toolchain.toml`, with the `regex` crate
+- 🐍 Python 3.11, 3.12, 3.13, or 3.14. Development uses 3.14 (`.python-version`). [uv](https://docs.astral.sh/uv/) installs it
+- 🔗 [PyO3](https://pyo3.rs/) and [maturin](https://www.maturin.rs/), so `llm_guardrails._core` is the extension module
+- 📦 Pydantic v2 models on the Python side of each guard
+- 🚀 [FastAPI](https://fastapi.tiangolo.com/) demo
+- 🧪 pytest, ruff, `cargo fmt`, `cargo clippy -D warnings`, `cargo test`
 
-## Features
+## 🚀 Get Started
 
-| Guard | Stage | Description |
-|---|---|---|
-| **PII / PHI Redaction** | Pre & Post | Regex-based detection and reversible redaction of emails, phone numbers, SSNs, credit cards, dates of birth, IP addresses, and names. |
-| **Prompt Injection Detection** | Pre | Pattern-matching engine that scores user input for known injection techniques (instruction override, role-play attacks, DAN jailbreaks, token smuggling). |
-| **Bias Scoring** | Post | Flags stereotyping language, absolute generalisations, and unbalanced demographic references in LLM output. |
-| **Output Validation** | Post | JSON schema validation, hedging-language (hallucination indicator) scoring, length constraints, required/blocked keyword checks. |
-| **Content Safety Pipeline** | Both | `GuardrailsPipeline` chains all guards into a single `pre_process` / `post_process` workflow with per-guard enable/disable switches. |
+### Requirements
 
----
+- [Rust](https://rustup.rs/), via rustup. Opening the repo selects the stable channel in `rust-toolchain.toml`
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- Python 3.11, 3.12, 3.13, or 3.14. `uv sync` reads `.python-version` and uses 3.14
 
-## Quick Start
-
-### Installation
+### Run It
 
 ```bash
-# Core library (builds Rust extension automatically via maturin)
-pip install .
-
-# With the FastAPI demo server
-pip install ".[api]"
-
-# Development (tests + linting)
-pip install ".[dev]"
-
-# Development build (editable, requires maturin)
-pip install maturin
-maturin develop
+uv sync --all-extras
+uv run uvicorn api.main:app --reload
 ```
 
-### Usage
+| What | Where |
+| --- | --- |
+| 🩺 Health | http://localhost:8000/health |
+| 📖 Interactive API docs | http://localhost:8000/docs |
+| 📄 OpenAPI document | http://localhost:8000/openapi.json |
+
+`GET /health` returns `{"status":"ok","version":"0.1.0"}`. That version string is hard-coded
+in `api/main.py`. The package version in `pyproject.toml` is `0.2.0`.
+
+Guard text from Python:
 
 ```python
 from llm_guardrails import GuardrailsPipeline
 
 pipeline = GuardrailsPipeline()
-
-# ── Input guardrails ──────────────────────────────────
-user_input = "My email is alice@example.com. Summarise this report."
-pre = pipeline.pre_process(user_input)
+pre = pipeline.pre_process("My email is alice@example.com. Summarise this report.")
 
 if pre.blocked:
-    print("Blocked by injection detector:", pre.injection.matched_rules)
+    print(pre.injection.matched_rules)
 else:
-    print("Sanitised prompt:", pre.sanitised_text)
-    # -> "My email is <<EMAIL_1>>. Summarise this report."
-
-    # Send pre.sanitised_text to your LLM ...
-    llm_response = call_your_llm(pre.sanitised_text)
-
-    # ── Output guardrails ─────────────────────────────
-    post = pipeline.post_process(llm_response, pre.pii_mapping)
-
-    print("Final response:", post.final_text)      # PII restored
-    print("Bias score:", post.bias.score)           # 0.0 - 1.0
-    print("Valid output:", post.validation.is_valid)
+    print(pre.sanitised_text)
+    # "My email is <<EMAIL_1>>. Summarise this report."
+    post = pipeline.post_process("Paris is the capital of France.", pre.pii_mapping)
+    print(post.final_text)
+    print(post.bias.score)
+    print(post.validation.is_valid)
 ```
 
-### Individual Guards
+`GuardrailsPipeline` takes its switches as constructor arguments (`pii_enabled`,
+`injection_enabled`, `bias_enabled`, `output_validation_enabled`, `injection_threshold`,
+`validation_rules`). `.env-template` lists similar names. Nothing in the library or the
+demo reads that file.
 
-```python
-from llm_guardrails import PIIRedactor, InjectionDetector, BiasScorer
+The demo does not call an LLM. `POST /guard/full` uses `simulated_llm_response` when you
+send one, and otherwise echoes a stub that quotes the sanitised prompt.
 
-# PII redaction
-redactor = PIIRedactor()
-redacted, mapping = redactor.redact("Call 555-123-4567")
-restored = redactor.restore(redacted, mapping)
-
-# Injection detection
-detector = InjectionDetector(threshold=0.5)
-detector.detect("Ignore previous instructions")   # True
-detector.score("What is 2+2?")                     # 0.0
-
-# Bias scoring
-scorer = BiasScorer()
-report = scorer.score("All men are strong leaders.")
-print(report.flags)  # ["Absolute generalisation about a demographic group", ...]
-```
-
----
-
-## API Server
-
-Start the demo FastAPI server:
+## 🛠️ Development
 
 ```bash
-uvicorn api.main:app --reload
+uv sync --locked --all-extras
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+python3 scripts/release_subject.py --self-test
 ```
 
-### Endpoints
+`uv sync` builds the extension. pytest needs that build because the wrappers import
+`llm_guardrails._core`. `cargo test` runs the Rust tests without Python.
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | Health check |
-| `POST` | `/guard/input` | Run input guardrails (PII redaction + injection detection) |
-| `POST` | `/guard/output` | Run output guardrails (validation + bias scoring + PII restore) |
-| `POST` | `/guard/full` | Full pipeline: input guards --> simulated LLM --> output guards |
+Two places to change when a guard's behaviour changes:
 
-#### Example: Input Guard
+- the Rust function in `src/`
+- the wrapper in `llm_guardrails/`, which should stay a conversion to a pydantic model
+
+`api/main.py` should keep calling `GuardrailsPipeline` rather than growing its own checks.
+
+## 📖 The API Documentation
+
+FastAPI builds the document from the route functions.
+
+| What | Where |
+| --- | --- |
+| 📖 Interactive reference | http://localhost:8000/docs |
+| 📄 The document | http://localhost:8000/openapi.json |
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| `GET` | `/health` | Returns status and the hard-coded demo version |
+| `POST` | `/guard/input` | `pre_process`: PII placeholders and an injection score |
+| `POST` | `/guard/output` | `post_process`: validation, bias score, PII restore |
+| `POST` | `/guard/full` | Input guards, then a stub or caller-supplied response, then output guards |
+
+Input example:
 
 ```bash
-curl -X POST http://localhost:8000/guard/input \
-  -H "Content-Type: application/json" \
+curl -s -X POST http://localhost:8000/guard/input \
+  -H 'Content-Type: application/json' \
   -d '{"text": "My SSN is 123-45-6789. What is the weather?"}'
 ```
 
-```json
-{
-  "sanitised_text": "My SSN is <<SSN_1>>. What is the weather?",
-  "pii_mapping": {"<<SSN_1>>": "123-45-6789"},
-  "injection_score": 0.0,
-  "is_injection": false,
-  "matched_rules": [],
-  "blocked": false
-}
+A blocked prompt (the injection score is at least the threshold, default `0.5`) comes back
+with `"blocked": true` and no output section on `/guard/full`.
+
+## ✅ Testing
+
+```bash
+uv run pytest
+cargo test
 ```
 
----
+pytest covers the wrappers and `GuardrailsPipeline` (`tests/`). `cargo test` covers the
+regex helpers in `src/`. The demo routes have no automated test yet.
 
-## Architecture
+## 🚢 Deployment
+
+The image in `Dockerfile` builds a wheel with maturin on `python:3.12-slim`, installs that
+wheel plus FastAPI and uvicorn, and serves `api.main:app` on port 8000.
+
+```bash
+docker build -t llm-guardrails .
+docker run --rm -p 8000:8000 llm-guardrails
+curl -s http://localhost:8000/health
+```
+
+The image does not load `.env-template`. Local development uses uv and Python 3.14.
+Publishing a wheel to PyPI is not wired up.
+
+GitHub Actions, on pull requests and on pushes to `main`:
+
+- `CI` runs ruff, pytest on Python 3.11 and 3.14, and `cargo fmt`, clippy, and `cargo test`
+- `Security` runs cargo-deny and pip-audit
+- `CodeQL` analyses Python and Rust with `build-mode: none`
+- `Release` opens a release pull request. It does not push to `main`
+
+## 🔒 Security
+
+What the library actually does:
+
+- **PII.** `src/pii_redactor.rs` replaces matches with `<<LABEL_N>>` and returns the map.
+  Labels are `SSN`, `CREDIT_CARD`, `EMAIL`, `PHONE`, `IP_ADDRESS`, `DATE_OF_BIRTH`, and
+  `NAME` (two consecutive capitalised words). The credit-card pattern is a run of 13–19
+  digits with optional spaces or dashes, not a Luhn check. `NAME` will match ordinary
+  title-case phrases. Restoration is a straight string replace of the placeholders.
+- **Injection.** Eight regular expressions (`ignore_previous`, `reveal_system_prompt`,
+  `role_play_attack`, `developer_mode`, `encoding_evasion`, `do_anything_now`,
+  `system_role_injection`, `token_smuggling`). The score is the highest matching weight,
+  plus `0.10` when two or more rules match, capped at `1.0`.
+- **Bias.** A handful of stereotype patterns, a gendered-token imbalance check, and an
+  absolute-generalisation pattern. The score is a weighted sum of those hits, capped at `1.0`.
+- **Output.** Optional max length, a top-level JSON `type` and `required` check (not full
+  JSON Schema), a hedging-phrase score exposed as `hallucination_score`, and
+  required/blocked keyword checks. A hedging hit is a `warning` and does not by itself
+  clear `is_valid`.
+
+The map of original PII stays in memory and is handed back to the caller. The library does
+not write it to disk. Discarding the map is how a caller drops those values. None of this
+is a complete privacy, safety, or compliance programme. Pair it with the controls your
+deployment actually needs, and do not send raw prompts to a model provider you have not
+reviewed.
+
+CI rejects known-vulnerable and yanked Rust crates (`deny.toml`) and known-vulnerable
+Python dependencies (`pip-audit`).
+
+## How the pieces fit
 
 ```mermaid
 flowchart LR
-    subgraph Input["INPUT GUARDRAILS (Rust)"]
-        PII["PII Redactor"]
-        INJ["Injection Detector"]
+    subgraph python [Python]
+        API[api.main FastAPI]
+        PIPE[GuardrailsPipeline]
+        WRAP[PIIRedactor InjectionDetector BiasScorer OutputValidator]
     end
-
-    subgraph Output["OUTPUT GUARDRAILS (Rust)"]
-        VAL["Output Validator"]
-        BIAS["Bias Scorer"]
-        RESTORE["PII Restorer"]
+    subgraph rust [Rust cdylib]
+        PII[pii_redactor]
+        INJ[injection_detector]
+        BIAS[bias_scorer]
+        VAL[output_validator]
     end
-
-    User([User Input]) --> PII
-    PII -->|sanitised text| INJ
-    INJ -->|blocked?| BLOCK{Block}
-    INJ -->|clean| LLM([LLM Call])
-    LLM --> VAL
-    VAL --> BIAS
-    BIAS --> RESTORE
-    RESTORE --> Response([Response])
-    BLOCK --> Rejected([Request Blocked])
+    API --> PIPE --> WRAP
+    WRAP --> PII
+    WRAP --> INJ
+    WRAP --> BIAS
+    WRAP --> VAL
 ```
-
-### Rust / Python Boundary
 
 ```mermaid
-graph TB
-    subgraph Python["Python Layer"]
-        API["FastAPI API"]
-        PIPE["GuardrailsPipeline"]
-        WRAP["Thin Wrapper Classes<br/>(PIIRedactor, InjectionDetector, etc.)"]
-    end
-
-    subgraph Rust["Rust Core (PyO3)"]
-        R_PII["pii_redactor.rs"]
-        R_INJ["injection_detector.rs"]
-        R_BIAS["bias_scorer.rs"]
-        R_VAL["output_validator.rs"]
-    end
-
-    API --> PIPE
-    PIPE --> WRAP
-    WRAP -->|FFI via PyO3| R_PII
-    WRAP -->|FFI via PyO3| R_INJ
-    WRAP -->|FFI via PyO3| R_BIAS
-    WRAP -->|FFI via PyO3| R_VAL
+sequenceDiagram
+    participant Caller
+    participant Pipeline as GuardrailsPipeline
+    participant Rust as llm_guardrails._core
+    Caller->>Pipeline: pre_process(text)
+    Pipeline->>Rust: pii_redact
+    Rust-->>Pipeline: sanitised text, mapping
+    Pipeline->>Rust: injection_analyse
+    Rust-->>Pipeline: score, matched rules
+    Pipeline-->>Caller: PreProcessResult
+    Note over Caller: Caller sends sanitised text to a model, or stops when blocked
+    Caller->>Pipeline: post_process(model text, mapping)
+    Pipeline->>Rust: output_validate
+    Pipeline->>Rust: bias_score
+    Pipeline->>Rust: pii_restore
+    Pipeline-->>Caller: PostProcessResult
 ```
 
-**Data flow:**
+## 📄 License
 
-1. **PII Redactor** (Rust) strips personally identifiable information and returns a reversible mapping.
-2. **Injection Detector** (Rust) scores the sanitised input; if above threshold the request is blocked.
-3. The cleaned prompt is forwarded to the LLM.
-4. **Output Validator** (Rust) checks the response against schema, length, and hallucination rules.
-5. **Bias Scorer** (Rust) flags stereotyping or unbalanced demographic language.
-6. **PII Restorer** (Rust) re-inserts original PII using the mapping from step 1.
-
----
-
-## Technology Stack
-
-| Component | Technology |
-|---|---|
-| **Core Engine** | Rust 2021 edition |
-| **Python Bindings** | PyO3 0.28 + maturin |
-| **Regex Engine** | Rust `regex` crate (compiled, zero-copy) |
-| **Python API** | Pydantic v2 models |
-| **HTTP Layer** | FastAPI + Uvicorn |
-| **Build** | maturin (PEP 517 compliant) |
-| **Container** | Multi-stage Docker (Rust build + slim runtime) |
-
----
-
-## Docker
-
-```bash
-# Build
-docker build -t llm-guardrails .
-
-# Run
-docker run -p 8000:8000 llm-guardrails
-
-# Test
-curl http://localhost:8000/health
-```
-
----
-
-## Configuration
-
-Copy `.env-template` to `.env` and customise:
-
-| Variable | Default | Description |
-|---|---|---|
-| `GUARDRAILS_INJECTION_THRESHOLD` | `0.5` | Injection score threshold (0.0 permissive -- 1.0 strict) |
-| `GUARDRAILS_PII_ENABLED` | `true` | Enable PII redaction/restoration |
-| `GUARDRAILS_INJECTION_ENABLED` | `true` | Enable injection detection |
-| `GUARDRAILS_BIAS_ENABLED` | `true` | Enable bias scoring |
-| `GUARDRAILS_OUTPUT_VALIDATION_ENABLED` | `true` | Enable output validation |
-| `GUARDRAILS_MAX_OUTPUT_LENGTH` | `4096` | Maximum output character count |
-| `API_HOST` | `0.0.0.0` | API server bind address |
-| `API_PORT` | `8000` | API server port |
-
----
-
-## Compliance Notes
-
-### GDPR
-
-- **No PII persistence.** The `PIIRedactor` operates entirely in memory. PII values are stored only in a transient `dict` that the caller controls; the library never writes PII to disk, logs, or external services.
-- **Data minimisation.** Only the redacted text is forwarded to the LLM. The original PII never leaves the trust boundary unless the caller explicitly calls `restore()`.
-- **Right to erasure.** Because PII is never persisted by the library, discarding the mapping dictionary is equivalent to erasure.
-
-### HIPAA
-
-- PHI patterns (dates of birth, SSNs used as MRNs) are covered by the PII redactor.
-- For full HIPAA compliance, deploy the library within a BAA-covered environment and ensure the LLM provider is also covered.
-
-### Auditability
-
-- Every guardrail returns structured, serialisable results (`BiasReport`, `InjectionResult`, `ValidationResult`) suitable for logging to an audit trail.
-- The `GuardrailsPipeline` surfaces all intermediate scores so compliance teams can review flagged interactions.
-
----
-
-## Development
-
-```bash
-# Prerequisites
-rustc --version   # Rust toolchain required
-pip install maturin
-
-# Build the native extension in development mode
-maturin develop
-
-# Run tests
-pytest
-
-# Run Rust unit tests
-cargo test
-
-# Lint
-ruff check .
-ruff format --check .
-```
-
----
-
-## License
-
-MIT
+MIT. Copyright (c) 2026 Melroy Anthony. See [LICENSE](LICENSE).

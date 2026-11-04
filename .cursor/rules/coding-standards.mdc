@@ -1,0 +1,12 @@
+---
+description: Rust and Python conventions for llm-guardrails
+globs: "**/*.{py,rs}"
+alwaysApply: false
+---
+
+Follow `AGENTS.md`.
+
+- Python installs and tools go through uv. Ruff is the linter and formatter. Detection logic stays in `src/`. Wrappers in `llm_guardrails/` stay thin.
+- Rust: `cargo fmt` and `cargo clippy --all-targets -- -D warnings`. Do not add `unwrap` on caller input.
+- Do not rename `llm_guardrails`. Do not select a Python newer than `.python-version`.
+- `.env-template` is not loaded by the library or the demo.

@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release pull request or tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Classify the commit on main
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git log -1 --pretty=%B > /tmp/commit-message.txt
+          number="$(python3 scripts/release_subject.py --pr-number --message-file /tmp/commit-message.txt)"
+          title=""
+          if [ -n "$number" ]; then
+            title="$(gh pr view "$number" --json title --jq .title || true)"
+          fi
+          printf '%s' "$title" > /tmp/pr-title.txt
+          python3 scripts/release_subject.py \
+            --version "$(tr -d '[:space:]' < .version)" \
+            --message-file /tmp/commit-message.txt \
+            --pr-title-file /tmp/pr-title.txt \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Install uv and Python 3.14
+        if: steps.rel.outputs.bump != 'none'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.14"
+
+      - name: Install Rust
+        if: steps.rel.outputs.bump != 'none'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+
+      - name: Open the release pull request
+        if: steps.rel.outputs.bump != 'none'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ steps.rel.outputs.next }}
+        run: |
+          set -euo pipefail
+          branch="release/v${NEXT}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "origin/${branch} already exists; not force-pushing"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          python3 scripts/release_subject.py \
+            --apply \
+            --message-file /tmp/commit-message.txt \
+            --pr-title-file /tmp/pr-title.txt \
+            --date "$(date -u +%F)"
+          uv lock
+          cargo metadata --format-version 1 >/dev/null
+          git add .version CHANGELOG.md Cargo.toml Cargo.lock pyproject.toml uv.lock
+          if [ -f .claude-plugin/plugin.json ]; then
+            git add .claude-plugin/plugin.json
+          fi
+          git commit -m "🔖 chore(release): v${NEXT}"
+          git push --set-upstream origin "$branch"
+          python3 scripts/release_subject.py --notes-for "$NEXT" > /tmp/notes.md
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "🔖 chore(release): v${NEXT}" \
+            --body-file /tmp/notes.md
+
+      - name: Tag the merged release commit
+        if: steps.rel.outputs.bump == 'none' && startsWith(steps.rel.outputs.subject, 'chore(release):')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < .version)"
+          tag="v${version}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "tag ${tag} already exists"
+            exit 0
+          fi
+          python3 scripts/release_subject.py --notes-for "$version" > /tmp/notes.md
+          git tag "$tag"
+          git push origin "$tag"
+          gh release create "$tag" --title "$tag" --notes-file /tmp/notes.md

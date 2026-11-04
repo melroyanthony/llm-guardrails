@@ -1,0 +1,47 @@
+{
+  "types": [
+    "feat",
+    "fix",
+    "docs",
+    "style",
+    "refactor",
+    "perf",
+    "test",
+    "build",
+    "ci",
+    "chore",
+    "deps",
+    "security",
+    "revert"
+  ],
+  "minor": ["feat"],
+  "patch": [
+    "fix",
+    "docs",
+    "style",
+    "refactor",
+    "perf",
+    "test",
+    "build",
+    "ci",
+    "chore",
+    "deps",
+    "security",
+    "revert"
+  ],
+  "emoji": {
+    "feat": "✨",
+    "fix": "🐛",
+    "docs": "📝",
+    "style": "🎨",
+    "refactor": "♻️",
+    "perf": "⚡️",
+    "test": "✅",
+    "build": "📦",
+    "ci": "👷",
+    "chore": "🔧",
+    "deps": "⬆️",
+    "security": "🔒️",
+    "revert": "⏪️"
+  }
+}

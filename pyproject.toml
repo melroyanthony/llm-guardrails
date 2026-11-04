@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Responsible AI toolkit for LLM applications -- Rust-powered PII redaction, prompt injection detection, bias scoring, and output validation with Python bindings."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 authors = [
     { name = "Melroy Anthony" },
 ]
@@ -18,8 +18,10 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Security",
@@ -35,7 +37,7 @@ api = [
     "uvicorn[standard]>=0.29,<1.0",
 ]
 dev = [
-    "pytest>=8.0,<9.0",
+    "pytest>=9.0.3,<10",
     "ruff>=0.4,<1.0",
 ]
 
@@ -47,7 +49,7 @@ module-name = "llm_guardrails._core"
 features = ["pyo3/extension-module"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
