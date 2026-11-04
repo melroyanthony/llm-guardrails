@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.2.3](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.3) (2026-11-04)
+
+### Bug Fixes
+
+* fix(release): allow notes under Unreleased in changelog check
+
 ## [0.2.2](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.2) (2026-11-04)
 
 ### Bug Fixes
