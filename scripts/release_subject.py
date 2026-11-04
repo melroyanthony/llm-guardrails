@@ -726,7 +726,7 @@ def _check_changelog() -> None:
     _check_empty_unreleased_is_idempotent()
     _check_prose_unreleased_is_consumed()
     _check_rerun_keeps_released_body_and_new_notes()
-    _check_changelog_keeps_empty_unreleased()
+    _check_changelog_keeps_unreleased_above_latest()
 
 
 def _check_unreleased_is_consumed() -> None:
@@ -807,27 +807,61 @@ def _check_empty_unreleased_is_idempotent() -> None:
         _fail(f"empty Unreleased release was not idempotent:\n{again}")
 
 
-def _empty_unreleased_above_version(text: str) -> bool:
-    """True when an empty Unreleased section sits directly above any X.Y.Z heading."""
-    return re.match(r"# Changelog\n\n## Unreleased\n\n## \[\d+\.\d+\.\d+\]", text) is not None
+def _unreleased_above_latest(text: str) -> bool:
+    """True when Unreleased is the first section and the next heading is a version.
+
+    Notes, bullets, and prose may sit between those headings.
+    """
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "# Changelog":
+        return False
+    index = 1
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    if index >= len(lines) or lines[index].strip() != _UNRELEASED:
+        return False
+    index += 1
+    while index < len(lines) and not _is_h2(lines[index]):
+        index += 1
+    return index < len(lines) and re.match(r"## \[\d+\.\d+\.\d+\]", lines[index].strip()) is not None
 
 
-def _check_changelog_keeps_empty_unreleased() -> None:
-    """The changelog keeps an empty Unreleased section above its latest version."""
+def _check_changelog_keeps_unreleased_above_latest() -> None:
+    """CHANGELOG.md keeps Unreleased directly under the title, above the latest version.
+
+    Notes under that heading are allowed. An empty Unreleased section is a fixture,
+    not a requirement of the file on disk. The release consumes the notes.
+    """
     on_disk = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    if not _empty_unreleased_above_version(on_disk):
+    if not _unreleased_above_latest(on_disk):
         preview = on_disk[:200]
-        _fail(f"CHANGELOG.md does not keep an empty Unreleased above the latest version:\n{preview}")
-    for version in ("0.2.1", "10.20.30"):
-        later = f"# Changelog\n\n## Unreleased\n\n## [{version}](https://example.invalid) (2026-11-04)\n"
-        if not _empty_unreleased_above_version(later):
-            _fail(f"{version} under an empty Unreleased was rejected")
+        _fail(f"CHANGELOG.md does not keep Unreleased above the latest version:\n{preview}")
+    empty = "# Changelog\n\n## Unreleased\n\n## [0.2.2](https://example.invalid) (2026-11-04)\n"
+    if not _unreleased_above_latest(empty):
+        _fail("an empty Unreleased section above a version was rejected")
+    noted = (
+        "# Changelog\n\n## Unreleased\n\n"
+        "### Bug Fixes\n\n* fix(release): allow notes under Unreleased\n\n"
+        "## [1.2.3](https://example.invalid) (2026-11-04)\n"
+    )
+    if not _unreleased_above_latest(noted):
+        _fail("notes under Unreleased were rejected")
     missing = "# Changelog\n\n## [1.2.3](https://example.invalid) (2026-11-04)\n"
-    if _empty_unreleased_above_version(missing):
-        _fail("a changelog with no empty Unreleased was accepted")
-    filled = "# Changelog\n\n## Unreleased\n\n* fix(release): kept by hand\n\n## [1.2.3]\n"
-    if _empty_unreleased_above_version(filled):
-        _fail("a filled Unreleased section was accepted")
+    if _unreleased_above_latest(missing):
+        _fail("a changelog with no Unreleased section was accepted")
+    rendered = prepend_changes(
+        noted,
+        "1.2.4",
+        [{"section": "Bug Fixes", "subject": "fix(release): generated line"}],
+        "2026-11-04",
+    )
+    if "fix(release): generated line" in rendered:
+        _fail(f"generated line was added beside hand-written notes:\n{rendered}")
+    version_body = rendered.split("## [1.2.4]", 1)[-1].split("## [", 1)[0]
+    if "* fix(release): allow notes under Unreleased" not in version_body:
+        _fail(f"hand-written note was not consumed into the new version:\n{rendered}")
+    if not rendered.startswith("# Changelog\n\n## Unreleased\n\n## [1.2.4]"):
+        _fail(f"consuming notes did not leave an empty Unreleased:\n{rendered}")
 
 
 def _check_prose_unreleased_is_consumed() -> None:
