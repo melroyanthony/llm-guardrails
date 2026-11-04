@@ -49,9 +49,22 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Read Rust channel
+        if: steps.rel.outputs.bump != 'none'
+        id: rust-channel
+        run: |
+          channel="$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)"
+          if [[ ! "$channel" =~ ^[0-9A-Za-z._+-]+$ ]]; then
+            echo "rust-toolchain.toml channel is missing or invalid: ${channel:-<empty>}" >&2
+            exit 1
+          fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+
       - name: Install Rust
         if: steps.rel.outputs.bump != 'none'
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ steps.rust-channel.outputs.channel }}
 
       - name: Open the release pull request
         if: steps.rel.outputs.bump != 'none'
