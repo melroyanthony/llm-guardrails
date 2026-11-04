@@ -43,7 +43,7 @@ def test_health_uses_package_version(client: TestClient):
     response = client.get("/health")
     assert response.status_code == 200
     reported = response.json()["version"]
-    assert reported == version("llm_guardrails")
+    assert reported == version("ferroguard")
     assert reported != "0.1.0"
 
 

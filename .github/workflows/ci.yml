@@ -110,3 +110,57 @@ jobs:
 
       - name: Test
         run: cargo test
+
+  wheel:
+    name: Wheel smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and Python 3.11
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.11"
+
+      - name: Read Rust channel
+        id: rust-channel
+        run: |
+          channel="$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)"
+          if [[ ! "$channel" =~ ^[0-9A-Za-z._+-]+$ ]]; then
+            echo "rust-toolchain.toml channel is missing or invalid: ${channel:-<empty>}" >&2
+            exit 1
+          fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ steps.rust-channel.outputs.channel }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Build one abi3 wheel
+        run: uvx --from maturin==1.16.0 maturin build --release --interpreter python3.11 --out dist --manylinux auto
+
+      - name: Install Python 3.14 and import the wheel
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/ferroguard-*-cp311-abi3-*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "expected one abi3 wheel" >&2
+            ls -la dist >&2 || true
+            exit 1
+          fi
+          uv python install 3.14
+          for py in 3.11 3.14; do
+            uv venv --python "$py" "/tmp/smoke-$py"
+            uv pip install --python "/tmp/smoke-$py/bin/python" "${wheels[0]}"
+            "/tmp/smoke-$py/bin/python" -c "import llm_guardrails; from importlib.metadata import version; from llm_guardrails._core import pii_redact; text, mapping = pii_redact('Mail a@b.co'); assert 'a@b.co' not in text and mapping; assert version('ferroguard'); print(version('ferroguard'), text)"
+          done

@@ -15,6 +15,9 @@ jobs:
     if: github.actor != 'github-actions[bot]' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, '🔖 chore(release):')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      tag: ${{ steps.publish.outputs.tag }}
     permissions:
       contents: write
     steps:
@@ -24,6 +27,7 @@ jobs:
           fetch-depth: 0
 
       - name: Publish the release commit and tag
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -35,7 +39,170 @@ jobs:
             --rev HEAD > /tmp/decision.json
           action="$(python3 -c 'import json; print(json.load(open("/tmp/decision.json"))["action"])')"
           if [ "$action" != "publish" ]; then
+            echo "published=false" >> "$GITHUB_OUTPUT"
             echo "release skipped: ${action}"
             exit 0
           fi
           python3 scripts/release_publish.py publish --decision-file /tmp/decision.json
+          action="$(python3 -c 'import json; print(json.load(open("/tmp/decision.json"))["action"])')"
+          if [ "$action" != "publish" ]; then
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "release skipped after publish: ${action}"
+            exit 0
+          fi
+          tag="$(python3 -c 'import json; print(json.load(open("/tmp/decision.json"))["tag"])')"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  # The version commit is pushed with GITHUB_TOKEN, so a workflow that
+  # triggers on the tag never starts. Wheels and PyPI stay in this run.
+  wheels:
+    name: Wheel ${{ matrix.id }}
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64
+            interpreter: python3.11
+          - id: linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64
+            interpreter: python3.11
+          - id: macos-arm64
+            os: macos-latest
+            target: aarch64
+            interpreter: python
+          - id: macos-x86_64
+            os: macos-15-intel
+            target: x86_64
+            interpreter: python
+          - id: windows-x86_64
+            os: windows-latest
+            target: x64
+            interpreter: python
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Install uv and Python 3.11
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.11"
+
+      - name: Build the abi3 wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.16.0
+          target: ${{ matrix.target }}
+          manylinux: auto
+          args: --release --out dist --interpreter ${{ matrix.interpreter }}
+
+      - name: Upload the wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wheel-${{ matrix.id }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: sdist
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Install uv and Python 3.11
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.11"
+
+      - name: Build the sdist
+        run: uvx --from maturin==1.16.0 maturin sdist --out dist
+
+      - name: Upload the sdist
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  pypi:
+    name: Publish to PyPI
+    needs: [release, wheels, sdist]
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: pypi
+    permissions:
+      id-token: write
+      attestations: write
+      contents: write
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: wheel-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Download the sdist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sdist
+          path: artifacts/sdist
+
+      - name: Collect distributions
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -type f \( -name '*.whl' -o -name '*.tar.gz' \) -exec cp {} dist/ \;
+          python3 - <<'PY'
+          from pathlib import Path
+          names = sorted(p.name for p in Path("dist").glob("ferroguard-*-cp311-abi3-*.whl"))
+          print("\n".join(names))
+          assert any("manylinux" in name and "x86_64" in name for name in names)
+          assert any("manylinux" in name and "aarch64" in name for name in names)
+          assert any("macosx" in name and "arm64" in name for name in names)
+          assert any("macosx" in name and "x86_64" in name for name in names)
+          assert any(name.endswith("win_amd64.whl") for name in names)
+          sdists = list(Path("dist").glob("ferroguard-*.tar.gz"))
+          assert len(sdists) == 1, sdists
+          PY
+
+      - name: Generate an SPDX SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: dist
+          format: spdx-json
+          output-file: ferroguard.spdx.json
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+          attestations: true
+          skip-existing: true
+
+      - name: Attach the SBOM to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ needs.release.outputs.tag }}" ferroguard.spdx.json --clobber

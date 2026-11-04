@@ -11,8 +11,8 @@ PyO3 exports it as `llm_guardrails._core`. The modules under `llm_guardrails/`
 are thin wrappers. `api/` is a FastAPI demo that calls `GuardrailsPipeline`.
 It does not call a model, and it does not read `.env-template`.
 
-Do not rename the import `llm_guardrails` or the distribution name in
-`pyproject.toml`. Do not publish a wheel from this tree.
+Do not rename the import `llm_guardrails`. The PyPI distribution name is
+`ferroguard`. Do not publish a wheel from this tree; `release.yml` does that.
 
 ## Core behaviours
 
@@ -36,7 +36,7 @@ When an intent matches a skill under `.claude/skills/`, read that skill before a
 - **Rust.** `cargo fmt` and `cargo clippy --all-targets -- -D warnings` must pass. Guard behaviour lives in `src/`. Fallible paths return `Result`. `Regex::new` inside a `Lazy` static may panic: a bad pattern is a programmer error. Do not add `unwrap` on caller input.
 - **Python.** Wrappers stay thin. Detection logic does not move back into `llm_guardrails/`. Tooling is `uv` only. Ruff lints and formats. `target-version` is `py311`. pytest and ruff are the default `dev` dependency group. The `api` extra is FastAPI. `uv sync --locked --all-extras` installs both. There is no `dev` extra.
 - **API.** `api/main.py` calls `GuardrailsPipeline`. It does not grow its own checks and it does not load environment variables.
-- **Release.** A releasable push to `main` commits the version bump and publishes the tag in one run. The highest bump since the last tag wins. `chore(release)` does not bump again. The job pushes that commit to `main` without force, then pushes the tag. It does not publish a wheel.
+- **Release.** A releasable push to `main` commits the version bump and publishes the tag in one run. The highest bump since the last tag wins. `chore(release)` does not bump again. The job pushes that commit to `main` without force, then pushes the tag. The same run builds the abi3 wheels and sdist from that tag and publishes them to PyPI. A workflow triggered by the tag push would not start.
 
 ## Delivery process
 
@@ -135,5 +135,5 @@ Known harness bugs this repo does not repeat:
 
 - Workflows live at `.github/workflows/`, not `solution/.github/workflows/`.
 - `uv.lock`, `Cargo.lock`, and `.claude/` are committed. They are not gitignored.
-- The release job pushes the version commit to `main` without force, then tags that commit. It does not rewrite a plugin manifest and it does not publish a wheel.
+- The release job pushes the version commit to `main` without force, then tags that commit. It does not rewrite a plugin manifest. The same run publishes the wheels to PyPI.
 - Claude settings do not pre-approve `curl`, `kubectl`, `helm`, or `terraform`.

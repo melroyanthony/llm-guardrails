@@ -4,7 +4,8 @@
 The workflow passes ``GH_TOKEN`` (``GITHUB_TOKEN``). The release commit is
 authored as ``github-actions[bot]``. A non-fast-forward push is retried by
 rebuilding the commit on ``origin/main``. This script never force-pushes.
-There is no package publish step.
+This script does not upload to PyPI. The release workflow builds the
+wheels from the tag this script pushes and publishes those.
 
 Re-running against a version that is already the tip of ``main``, or already
 tagged, does not create a second commit, tag, or GitHub Release.

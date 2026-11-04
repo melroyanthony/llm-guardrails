@@ -3,7 +3,7 @@ requires = ["maturin>=1.16.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "llm_guardrails"
+name = "ferroguard"
 dynamic = ["version"]
 description = "Responsible AI toolkit for LLM applications -- Rust-powered PII redaction, prompt injection detection, bias scoring, and output validation with Python bindings."
 readme = "README.md"

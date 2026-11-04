@@ -2,7 +2,9 @@
 
 A push to `main` publishes in one GitHub Actions run. The workflow is
 [`.github/workflows/release.yml`](.github/workflows/release.yml). It does not
-open a pull request, and it does not publish a wheel.
+open a pull request. The same run builds the wheels and publishes them to PyPI.
+A workflow that started on the tag push would not run: the version commit is
+pushed with `GITHUB_TOKEN`.
 
 ## When the job runs
 
@@ -62,7 +64,40 @@ times. It then creates the `vX.Y.Z` tag on that commit, pushes the tag, and
 opens a GitHub Release whose notes point at `CHANGELOG.md`.
 
 A re-run against a version that is already the tip of `main`, or already
-tagged, does not create a second commit, tag, or GitHub Release.
+tagged, does not create a second commit, tag, or GitHub Release. Wheel jobs
+still build when the decision stays `publish`, and the PyPI upload skips
+files that are already there.
+
+## Wheels and PyPI
+
+After the tag exists, this same workflow checks out that tag and builds one
+abi3-py311 wheel for each of:
+
+- Linux manylinux x86_64 (`ubuntu-latest`)
+- Linux manylinux aarch64 (`ubuntu-24.04-arm`)
+- macOS arm64 (`macos-latest`)
+- macOS x86_64 (`macos-15-intel`)
+- Windows x86_64 (`windows-latest`)
+
+It also builds an sdist. The `pypi` job downloads those artifacts, writes an
+SPDX SBOM, uploads the distributions with PyPI trusted publishing (OIDC,
+`id-token: write`, provenance attestations), and attaches the SBOM to the
+GitHub Release. There is no PyPI API token.
+
+The publish job uses the GitHub environment `pypi`. Before the first release,
+register a trusted publisher on PyPI:
+
+| Setting | Value |
+| --- | --- |
+| PyPI project name | `ferroguard` |
+| Owner | `melroyanthony` |
+| Repository name | `llm-guardrails` |
+| Workflow filename | `release.yml` |
+| Environment name | `pypi` |
+
+Create the GitHub environment `pypi` on this repository with no secret and no
+required reviewer, unless a reviewer should approve each publish. Use a
+pending publisher if the PyPI project does not exist yet.
 
 ## Local checks
 
