@@ -807,11 +807,27 @@ def _check_empty_unreleased_is_idempotent() -> None:
         _fail(f"empty Unreleased release was not idempotent:\n{again}")
 
 
+def _empty_unreleased_above_version(text: str) -> bool:
+    """True when an empty Unreleased section sits directly above any X.Y.Z heading."""
+    return re.match(r"# Changelog\n\n## Unreleased\n\n## \[\d+\.\d+\.\d+\]", text) is not None
+
+
 def _check_changelog_keeps_empty_unreleased() -> None:
-    """This library's changelog keeps an empty Unreleased section above 0.2.0."""
+    """The changelog keeps an empty Unreleased section above its latest version."""
     on_disk = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    if not on_disk.startswith("# Changelog\n\n## Unreleased\n\n## [0.2.0]"):
-        _fail("CHANGELOG.md does not keep an empty Unreleased above 0.2.0")
+    if not _empty_unreleased_above_version(on_disk):
+        preview = on_disk[:200]
+        _fail(f"CHANGELOG.md does not keep an empty Unreleased above the latest version:\n{preview}")
+    for version in ("0.2.1", "10.20.30"):
+        later = f"# Changelog\n\n## Unreleased\n\n## [{version}](https://example.invalid) (2026-11-04)\n"
+        if not _empty_unreleased_above_version(later):
+            _fail(f"{version} under an empty Unreleased was rejected")
+    missing = "# Changelog\n\n## [1.2.3](https://example.invalid) (2026-11-04)\n"
+    if _empty_unreleased_above_version(missing):
+        _fail("a changelog with no empty Unreleased was accepted")
+    filled = "# Changelog\n\n## Unreleased\n\n* fix(release): kept by hand\n\n## [1.2.3]\n"
+    if _empty_unreleased_above_version(filled):
+        _fail("a filled Unreleased section was accepted")
 
 
 def _check_prose_unreleased_is_consumed() -> None:
