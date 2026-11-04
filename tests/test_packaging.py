@@ -22,11 +22,19 @@ def test_release_publishes_inside_release_yml():
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     header, _, jobs = workflow.partition("jobs:")
     assert "tags:" not in header
-    assert "environment: pypi" in jobs
-    assert "id-token: write" in jobs
-    assert "attestations: true" in jobs
+    _, _, after_pypi = jobs.partition("\n  pypi:")
+    pypi, _, sbom = after_pypi.partition("\n  sbom:")
+    assert "environment: pypi" in pypi
+    assert "id-token: write" in pypi
+    assert "attestations: true" in pypi
+    assert "attestations: write" not in pypi
+    assert "contents: write" not in pypi
+    assert "actions: read" in pypi
+    assert "needs: pypi" in sbom
+    assert "contents: write" in sbom
+    assert "anchore/sbom-action@" in sbom
+    assert "ferroguard.spdx.json" in sbom
     assert "maturin sdist" in jobs
-    assert "ferroguard.spdx.json" in jobs
     assert "PYPI_TOKEN" not in workflow
     assert "password:" not in workflow
     for needle in (
@@ -41,5 +49,10 @@ def test_release_publishes_inside_release_yml():
     assert "ossf/scorecard-action@" in scorecard
     assert "publish_results: true" in scorecard
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "maturin build" in ci
+    assert "PyO3/maturin-action@" in ci
+    assert "manylinux: auto" in ci
+    assert "target: x86_64" in ci
+    assert "--interpreter python3.11" in ci
+    assert "manylinux_2_17_x86_64" in ci
+    assert 'python" -P' in ci
     assert "3.14" in ci

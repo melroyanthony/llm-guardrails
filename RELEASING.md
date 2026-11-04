@@ -73,16 +73,22 @@ files that are already there.
 After the tag exists, this same workflow checks out that tag and builds one
 abi3-py311 wheel for each of:
 
-- Linux manylinux x86_64 (`ubuntu-latest`)
-- Linux manylinux aarch64 (`ubuntu-24.04-arm`)
+- Linux x86_64 (`ubuntu-latest`) and aarch64 (`ubuntu-24.04-arm`), both with
+  `manylinux: auto`. That builds in the manylinux2014 image. The wheel
+  filename carries `manylinux_2_17_<arch>` and the `manylinux2014_<arch>` alias.
 - macOS arm64 (`macos-latest`)
 - macOS x86_64 (`macos-15-intel`)
 - Windows x86_64 (`windows-latest`)
 
-It also builds an sdist. The `pypi` job downloads those artifacts, writes an
-SPDX SBOM, uploads the distributions with PyPI trusted publishing (OIDC,
-`id-token: write`, provenance attestations), and attaches the SBOM to the
-GitHub Release. There is no PyPI API token.
+It also builds an sdist. The `pypi` job only downloads those artifacts and
+uploads them with PyPI trusted publishing. Its permissions are `id-token: write`
+and `actions: read` (so it can download this run's artifacts). PEP 740
+attestations are signed with that OIDC token. The job does not have
+`attestations: write` or `contents: write`. There is no PyPI API token.
+
+A later job, which `needs: pypi` and has `contents: write`, writes an SPDX
+SBOM of the same artifacts and attaches `ferroguard.spdx.json` to the GitHub
+Release.
 
 The publish job uses the GitHub environment `pypi`. Before the first release,
 register a trusted publisher on PyPI:
@@ -96,8 +102,10 @@ register a trusted publisher on PyPI:
 | Environment name | `pypi` |
 
 Create the GitHub environment `pypi` on this repository with no secret and no
-required reviewer, unless a reviewer should approve each publish. Use a
-pending publisher if the PyPI project does not exist yet.
+required reviewer, unless a reviewer should approve each publish. Limit that
+environment's deployment branches to `main`, so a workflow on another branch
+cannot use the trusted publisher. Use a pending publisher if the PyPI project
+does not exist yet.
 
 ## Local checks
 

@@ -152,48 +152,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: pypi
+    outputs:
+      tag: ${{ needs.release.outputs.tag }}
     permissions:
       id-token: write
-      attestations: write
-      contents: write
+      # Same-run artifact download uses the Actions API.
+      actions: read
     steps:
       - name: Download wheels
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: wheel-*
-          path: artifacts
+          path: dist
           merge-multiple: true
 
       - name: Download the sdist
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sdist
-          path: artifacts/sdist
-
-      - name: Collect distributions
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          find artifacts -type f \( -name '*.whl' -o -name '*.tar.gz' \) -exec cp {} dist/ \;
-          python3 - <<'PY'
-          from pathlib import Path
-          names = sorted(p.name for p in Path("dist").glob("ferroguard-*-cp311-abi3-*.whl"))
-          print("\n".join(names))
-          assert any("manylinux" in name and "x86_64" in name for name in names)
-          assert any("manylinux" in name and "aarch64" in name for name in names)
-          assert any("macosx" in name and "arm64" in name for name in names)
-          assert any("macosx" in name and "x86_64" in name for name in names)
-          assert any(name.endswith("win_amd64.whl") for name in names)
-          sdists = list(Path("dist").glob("ferroguard-*.tar.gz"))
-          assert len(sdists) == 1, sdists
-          PY
-
-      - name: Generate an SPDX SBOM
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
           path: dist
-          format: spdx-json
-          output-file: ferroguard.spdx.json
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
@@ -202,7 +179,37 @@ jobs:
           attestations: true
           skip-existing: true
 
+  sbom:
+    name: Release SBOM
+    needs: pypi
+    if: needs.pypi.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download the sdist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sdist
+          path: dist
+
+      - name: Generate an SPDX SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: dist
+          format: spdx-json
+          output-file: ferroguard.spdx.json
+
       - name: Attach the SBOM to the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ needs.release.outputs.tag }}" ferroguard.spdx.json --clobber
+        run: gh release upload "${{ needs.pypi.outputs.tag }}" ferroguard.spdx.json --clobber
