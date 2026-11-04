@@ -1,5 +1,0 @@
-interface:
-  display_name: "To Tickets"
-  short_description: "Tracer-bullet tickets with blockers"
-policy:
-  allow_implicit_invocation: false

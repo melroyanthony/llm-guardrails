@@ -1,5 +1,0 @@
-interface:
-  display_name: "Ask SDLC"
-  short_description: "Router over user-invoked SDLC flows"
-policy:
-  allow_implicit_invocation: false

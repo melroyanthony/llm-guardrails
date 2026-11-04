@@ -46,6 +46,6 @@ target/
 .DS_Store
 Thumbs.db
 
-# Local Codex links. Not committed: Cursor and Copilot would list each skill twice.
-.agents/skills/
+# Scratch checkouts from scripts/install-harness-from.sh
+.claude/upstream/
 .claude/worktrees/

@@ -1,11 +1,4 @@
 {
-  "extends": ["@commitlint/config-conventional"],
-  "parserPreset": {
-    "parserOpts": {
-      "headerPattern": "^(?:\\S+\\s+)?(?<type>[a-z]+)(?:\\((?<scope>[\\w.-]+)\\))?(?<breaking>!)?:\\s+(?<subject>.+)$",
-      "headerCorrespondence": ["type", "scope", "breaking", "subject"]
-    }
-  },
   "rules": {
     "type-enum": [
       2,
@@ -21,42 +14,29 @@
         "build",
         "ci",
         "chore",
-        "revert",
+        "deps",
         "security",
-        "deps"
+        "revert"
       ]
     ],
     "scope-enum": [
       1,
       "always",
       [
-        "backend",
-        "frontend",
-        "database",
+        "core",
         "api",
-        "auth",
-        "devops",
-        "infra",
         "docs",
         "deps",
-        "skills",
+        "ci",
+        "release",
+        "repo",
         "agents",
         "commands",
         "hooks",
         "rules",
-        "stage-0",
-        "stage-1",
-        "stage-2",
-        "stage-3",
-        "stage-4",
-        "stage-5",
-        "checkpoint",
-        "release"
+        "security"
       ]
     ],
-    "type-empty": [2, "never"],
-    "subject-case": [0],
-    "body-max-line-length": [0],
     "header-max-length": [2, "always", 72]
   }
 }

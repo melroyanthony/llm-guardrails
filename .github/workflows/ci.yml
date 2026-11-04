@@ -63,10 +63,11 @@ jobs:
       - name: Pytest
         run: uv run pytest
 
-      - name: Release self-tests
+      - name: Release and harness self-tests
         run: |
           python3 scripts/release_subject.py --self-test
           python3 scripts/release_publish.py --self-test
+          python3 scripts/test_guardrails.py
 
   rust:
     name: Rust

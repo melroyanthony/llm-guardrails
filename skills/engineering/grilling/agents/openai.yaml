@@ -1,5 +1,0 @@
-interface:
-  display_name: "Grilling"
-  short_description: "Relentless decision-tree interview loop"
-policy:
-  allow_implicit_invocation: true

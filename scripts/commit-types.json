@@ -1,17 +1,18 @@
 {
   "types": [
-    {"name": "feat", "bump": "minor", "section": "Features"},
-    {"name": "fix", "bump": "patch", "section": "Bug Fixes"},
-    {"name": "docs", "bump": "patch", "section": "Documentation"},
-    {"name": "style", "bump": "patch", "section": "Style"},
-    {"name": "refactor", "bump": "patch", "section": "Refactoring"},
-    {"name": "perf", "bump": "patch", "section": "Performance"},
-    {"name": "test", "bump": "patch", "section": "Testing"},
-    {"name": "build", "bump": "patch", "section": "Build"},
-    {"name": "ci", "bump": "patch", "section": "CI/CD"},
-    {"name": "chore", "bump": "patch", "section": "Miscellaneous"},
-    {"name": "revert", "bump": "patch", "section": "Reverts"},
-    {"name": "security", "bump": "patch", "section": "Security"},
-    {"name": "deps", "bump": "patch", "section": "Dependencies"}
-  ]
+    { "name": "feat", "emoji": "✨", "bump": "minor", "section": "Features" },
+    { "name": "fix", "emoji": "🐛", "bump": "patch", "section": "Bug Fixes" },
+    { "name": "docs", "emoji": "📝", "bump": "patch", "section": "Documentation" },
+    { "name": "style", "emoji": "🎨", "bump": "patch", "section": "Styles" },
+    { "name": "refactor", "emoji": "♻️", "bump": "patch", "section": "Refactor" },
+    { "name": "perf", "emoji": "⚡️", "bump": "patch", "section": "Performance" },
+    { "name": "test", "emoji": "✅", "bump": "patch", "section": "Tests" },
+    { "name": "build", "emoji": "📦", "bump": "patch", "section": "Build" },
+    { "name": "ci", "emoji": "👷", "bump": "patch", "section": "CI" },
+    { "name": "chore", "emoji": "🔧", "bump": "patch", "section": "Chores" },
+    { "name": "deps", "emoji": "⬆️", "bump": "patch", "section": "Dependencies" },
+    { "name": "security", "emoji": "🔒️", "bump": "patch", "section": "Security" },
+    { "name": "revert", "emoji": "⏪️", "bump": "patch", "section": "Reverts" }
+  ],
+  "extraEmoji": ["🔥", "🚚", "🚨", "💚", "🎉", "🔖"]
 }

@@ -58,6 +58,9 @@ extend-exclude = [
     "scripts/release_publish.py",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"scripts/test_guardrails.py" = ["S603", "S607"]
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "S", "B", "A", "C4", "SIM"]
 ignore = ["S101"]

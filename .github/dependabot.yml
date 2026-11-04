@@ -1,18 +1,16 @@
+# Weekly grouped updates, one pull request per ecosystem.
+# npm is omitted: this repository has no Node app. Docker tracks the
+# Dockerfile. uv tracks pyproject.toml and uv.lock.
 version: 2
 updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      github-actions:
-        patterns:
-          - "*"
-
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "⬆️"
+    labels:
+      - upgrade
     groups:
       cargo:
         patterns:
@@ -22,7 +20,37 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "⬆️"
+    labels:
+      - upgrade
     groups:
       uv:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "⬆️"
+    labels:
+      - upgrade
+    groups:
+      docker:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "⬆️"
+    labels:
+      - upgrade
+    groups:
+      github-actions:
         patterns:
           - "*"
