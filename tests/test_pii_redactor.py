@@ -203,3 +203,27 @@ class TestFalsePositives:
     def test_empty_allow_entities_raises(self):
         with pytest.raises(ValueError, match="allow_entities"):
             PIIRedactor(allow_entities=[])
+
+
+class TestEntityFiltersAreReadOnly:
+    def test_allow_and_deny_entities_are_read_only(self):
+        redactor = PIIRedactor(allow_entities=["EMAIL"], deny_entities=["PHONE"])
+        assert redactor.allow_entities == ("EMAIL",)
+        assert redactor.deny_entities == ("PHONE",)
+        with pytest.raises(AttributeError):
+            redactor.allow_entities = ["SSN"]
+        with pytest.raises(AttributeError):
+            redactor.deny_entities = ["EMAIL"]
+        redacted, mapping = redactor.redact("Email alice@example.com or call 555-123-4567.")
+        assert "alice@example.com" not in redacted
+        assert "555-123-4567" in redacted
+        assert set(mapping) == {"<<EMAIL_1>>"}
+
+    def test_default_entity_filters_reject_assignment(self):
+        redactor = PIIRedactor()
+        assert redactor.allow_entities is None
+        assert redactor.deny_entities is None
+        with pytest.raises(AttributeError):
+            redactor.allow_entities = ["EMAIL"]
+        with pytest.raises(AttributeError):
+            redactor.deny_entities = ["PHONE"]

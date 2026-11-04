@@ -19,6 +19,8 @@ class PIIRedactor:
     ``allow_entities`` limits detection to those labels. An empty list
     raises ``ValueError`` because it would redact nothing. ``deny_entities``
     skips those labels. A denied label wins when it is also allowed.
+    Both are read-only tuples after construction: assigning either one
+    raises ``AttributeError``. Pass the labels to the constructor.
     A label outside the built-in set raises ``ValueError`` and names the
     unknown label. Card numbers must pass the Luhn check. An SSN whose area
     is ``000``, ``666``, or ``9xx``, whose group is ``00``, or whose serial
@@ -44,8 +46,26 @@ class PIIRedactor:
     ) -> None:
         # Reject an empty allow list and unknown labels before any text is kept.
         pii_redact("", allow_entities, deny_entities)
-        self.allow_entities = allow_entities
-        self.deny_entities = deny_entities
+        self._allow_entities = None if allow_entities is None else tuple(allow_entities)
+        self._deny_entities = None if deny_entities is None else tuple(deny_entities)
+
+    @property
+    def allow_entities(self) -> tuple[str, ...] | None:
+        """Labels detected, or ``None`` for every built-in label.
+
+        The tuple is fixed at construction. Assigning the property raises
+        ``AttributeError``.
+        """
+        return self._allow_entities
+
+    @property
+    def deny_entities(self) -> tuple[str, ...] | None:
+        """Labels skipped, or ``None`` when nothing is skipped.
+
+        The tuple is fixed at construction. Assigning the property raises
+        ``AttributeError``.
+        """
+        return self._deny_entities
 
     def redact(self, text: str) -> tuple[str, dict[str, str]]:
         """Replace PII tokens with placeholders.
@@ -59,7 +79,7 @@ class PIIRedactor:
             ``{placeholder: original_value}`` -- pass this to ``restore``
             to recover the original text.
         """
-        return pii_redact(text, self.allow_entities, self.deny_entities)
+        return pii_redact(text, self._allow_entities, self._deny_entities)
 
     @staticmethod
     def restore(text: str, mapping: dict[str, str]) -> str:

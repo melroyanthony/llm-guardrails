@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Breaking changes
+
+* `PIIRedactor.allow_entities` and `deny_entities` are read-only. Assigning either one after construction raises `AttributeError`. Each value is a tuple, or `None`, and cannot be changed in place. Pass the labels to the constructor.
+
+### Features
+
+* The package ships `py.typed` and `llm_guardrails/_core.pyi`, so type checkers see the native module. CI runs mypy on `llm_guardrails/`.
+
 ## [0.2.8](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.2.8) (2026-11-04)
 
 ### Breaking changes
