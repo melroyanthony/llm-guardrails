@@ -1,14 +1,33 @@
 # ── Rust build stage ──────────────────────────────────────────────────
-FROM python:3.12-slim AS builder
+# python:3.12-slim index digest. Dependabot's weekly docker group moves
+# this digest. The tag stays in the reference so the update stays readable.
+FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54 AS builder
 
+# rustup-init 1.29.3. The compiler channel stays stable, matching
+# rust-toolchain.toml. These checksums change only when RUSTUP_VERSION is
+# bumped on purpose. Dependabot does not refresh them.
+ARG RUSTUP_VERSION=1.29.3
+COPY scripts/verify_rustup_init.sh /usr/local/bin/verify_rustup_init.sh
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl build-essential && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    rm -rf /var/lib/apt/lists/*
+        curl build-essential \
+    && arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         amd64) triple=x86_64-unknown-linux-gnu; expected=b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55 ;; \
+         arm64) triple=aarch64-unknown-linux-gnu; expected=9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282 ;; \
+         *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /tmp/rustup-init \
+         "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${triple}/rustup-init" \
+    && sh /usr/local/bin/verify_rustup_init.sh /tmp/rustup-init "$expected" \
+    && chmod +x /tmp/rustup-init \
+    && /tmp/rustup-init -y --default-toolchain stable --profile minimal \
+    && rm -rf /var/lib/apt/lists/* /tmp/rustup-init
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
+# ghcr.io/astral-sh/uv:0.13.7 index digest. The same Dependabot docker
+# group moves this digest.
+COPY --from=ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
@@ -26,9 +45,9 @@ COPY api/ api/
 RUN maturin build --release --out dist
 
 # ── Runtime stage ─────────────────────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
 
-COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
