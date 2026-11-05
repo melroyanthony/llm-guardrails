@@ -55,6 +55,8 @@ def test_release_publishes_inside_release_yml():
     assert "contents: write" in sbom
     assert "anchore/sbom-action@" in sbom
     assert "ferroguard.spdx.json" in sbom
+    wheels_job = jobs.split("\n  wheels:", 1)[1].split("\n  sdist:", 1)[0]
+    assert "enable-cache: false" in wheels_job
     assert "maturin sdist" in jobs
     assert "PYPI_TOKEN" not in workflow
     assert "password:" not in workflow

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+* Release wheel jobs no longer fail after the wheel is uploaded. Those jobs do not install Python packages with uv, so setup-uv no longer tries to save a dependency cache they never create.
+
 ## [0.3.1](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.1) (2026-11-05)
 
 ### Breaking changes
