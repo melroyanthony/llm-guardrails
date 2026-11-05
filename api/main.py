@@ -11,29 +11,42 @@ POST /guard/output  -- Run output guardrails (validation + bias scoring + PII re
 POST /guard/full    -- Full pipeline: input guards -> simulated LLM -> output guards
 GET  /health        -- Health check
 
-``/guard/input`` returns an opaque ``pii_mapping_id``. A non-empty map stays in
-this process for ``MAPPING_TTL_SECONDS`` and is popped on the first
-``/guard/output`` call. The id is not shared across workers.
+``/guard/input`` returns an opaque ``pii_mapping_id``. A non-empty map that
+fits the entry and byte budgets stays in this process for
+``MAPPING_TTL_SECONDS`` and is popped on the first ``/guard/output`` call.
+A map that does not fit is not stored, and it does not remove another
+caller's id. The id is not shared across workers.
 """
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.pii_store import MappingStore
+from api.body_limit import LimitRequestBody
+from api.pii_store import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_ENTRIES,
+    DEFAULT_MAX_ENTRY_BYTES,
+    MappingStore,
+)
 from llm_guardrails.pipeline import GuardrailsPipeline
 
 MAX_TEXT_LENGTH = 8_000
 MAX_BODY_BYTES = 32 * 1024
 MAPPING_TTL_SECONDS = 15 * 60
-MAX_MAPPING_ENTRIES = 10_000
+MAX_MAPPING_ENTRIES = DEFAULT_MAX_ENTRIES
+MAX_MAPPING_BYTES = DEFAULT_MAX_BYTES
+MAX_MAPPING_ENTRY_BYTES = DEFAULT_MAX_ENTRY_BYTES
 
 _pipeline: GuardrailsPipeline | None = None
-_store = MappingStore(max_entries=MAX_MAPPING_ENTRIES)
+_store = MappingStore(
+    max_entries=MAX_MAPPING_ENTRIES,
+    max_bytes=MAX_MAPPING_BYTES,
+    max_entry_bytes=MAX_MAPPING_ENTRY_BYTES,
+)
 
 
 def package_version() -> str:
@@ -67,37 +80,7 @@ app = FastAPI(
     ),
     version=package_version(),
 )
-
-
-def _body_too_large() -> JSONResponse:
-    return JSONResponse(
-        status_code=413,
-        content={"detail": f"Request body exceeds {MAX_BODY_BYTES} bytes."},
-    )
-
-
-@app.middleware("http")
-async def limit_request_body(request: Request, call_next):
-    content_length = request.headers.get("content-length")
-    if content_length is not None:
-        try:
-            declared = int(content_length)
-        except ValueError:
-            declared = None
-        if declared is not None and declared > MAX_BODY_BYTES:
-            return _body_too_large()
-    # Count chunked bodies as they arrive. Stop at the cap instead of reading
-    # a request that never sent Content-Length all the way through.
-    received = 0
-    chunks: list[bytes] = []
-    async for chunk in request.stream():
-        received += len(chunk)
-        if received > MAX_BODY_BYTES:
-            return _body_too_large()
-        if chunk:
-            chunks.append(chunk)
-    request._body = b"".join(chunks)
-    return await call_next(request)
+app.add_middleware(LimitRequestBody, max_bytes=MAX_BODY_BYTES)
 
 
 class _RequestModel(BaseModel):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -259,17 +260,57 @@ def test_full_does_not_store_a_mapping(client: TestClient):
     assert "alice@example.com" in response.json()["output_guard"]["final_text"]
 
 
-def test_store_cap_evicts_oldest():
+def test_chunked_limit_does_not_use_starlette_private_body():
+    root = Path(__file__).resolve().parents[1]
+    for name in ("main.py", "body_limit.py"):
+        text = (root / "api" / name).read_text(encoding="utf-8")
+        assert "request._body" not in text
+        assert "_body =" not in text
+
+
+def test_store_refuses_a_new_map_instead_of_evicting():
     from api.pii_store import MappingStore
 
-    store = MappingStore(max_entries=2)
+    store = MappingStore(max_entries=2, max_bytes=10_000, max_entry_bytes=1_000)
     first = store.put({"n": "1"}, 60)
     second = store.put({"n": "2"}, 60)
     third = store.put({"n": "3"}, 60)
-    assert store.pop(first, 60) is None
+    assert third is None
+    assert store.pop(first, 60) == {"n": "1"}
     assert store.pop(second, 60) == {"n": "2"}
-    assert store.pop(third, 60) == {"n": "3"}
-    assert MappingStore().max_entries == 10_000
+    assert MappingStore().max_entries == main.MAX_MAPPING_ENTRIES
+    assert MappingStore().max_bytes == main.MAX_MAPPING_BYTES
+    assert MappingStore().max_entry_bytes == main.MAX_MAPPING_ENTRY_BYTES
+
+
+def test_oversized_mapping_does_not_change_the_store():
+    from api.pii_store import MappingStore, mapping_nbytes
+
+    store = MappingStore(max_entries=4, max_bytes=200, max_entry_bytes=20)
+    kept = store.put({"a": "b"}, 60)
+    assert kept is not None
+    before = store.nbytes
+    refused = store.put({"k": "x" * 40}, 60)
+    assert refused is None
+    assert mapping_nbytes({"k": "x" * 40}) > store.max_entry_bytes
+    assert store.nbytes == before
+    assert store.pop(kept, 60) == {"a": "b"}
+
+
+def test_byte_budget_refuses_without_evicting():
+    from api.pii_store import MappingStore
+
+    store = MappingStore(max_entries=10, max_bytes=24, max_entry_bytes=20)
+    first = store.put({"a": "1234"}, 60)
+    assert first is not None
+    refused = False
+    for index in range(10):
+        token = store.put({str(index): "1234"}, 60)
+        if token is None:
+            refused = True
+            break
+    assert refused
+    assert store.pop(first, 60) == {"a": "1234"}
 
 
 def test_full_restores_without_returning_the_mapping(client: TestClient):
