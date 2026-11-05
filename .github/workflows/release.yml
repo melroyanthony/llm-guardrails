@@ -140,7 +140,7 @@ jobs:
   wheels:
     name: Wheel ${{ matrix.id }}
     needs: selected
-    if: needs.selected.outputs.published == 'true'
+    if: ${{ !cancelled() && needs.selected.result == 'success' && needs.selected.outputs.published == 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -202,7 +202,7 @@ jobs:
   sdist:
     name: sdist
     needs: selected
-    if: needs.selected.outputs.published == 'true'
+    if: ${{ !cancelled() && needs.selected.result == 'success' && needs.selected.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -232,7 +232,7 @@ jobs:
   pypi:
     name: Publish to PyPI
     needs: [selected, wheels, sdist]
-    if: needs.selected.outputs.published == 'true' && needs.wheels.result == 'success' && needs.sdist.result == 'success'
+    if: ${{ !cancelled() && needs.selected.result == 'success' && needs.selected.outputs.published == 'true' && needs.wheels.result == 'success' && needs.sdist.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: pypi
@@ -327,7 +327,7 @@ jobs:
   sbom:
     name: Release SBOM
     needs: pypi
-    if: needs.pypi.result == 'success'
+    if: ${{ !cancelled() && needs.pypi.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
