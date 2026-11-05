@@ -55,9 +55,30 @@
   --md-typeset-a-color: var(--fg-link);
 }
 
+/*
+  RM Neue Regular and RM Neue SemiBold are not in this repository.
+  CoType licenses them separately for one domain, and no licensed
+  WOFF or WOFF2 files are available here. The families after
+  "RM Neue" are the faces the page renders.
+*/
+@font-face {
+  font-family: "Libre Baskerville";
+  src: url("../assets/fonts/libre-baskerville/LibreBaskerville[wght].ttf") format("truetype");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 body {
   background-color: var(--fg-paper);
-  font-family: "DejaVu Sans", "Liberation Sans", sans-serif;
+  font-family: "RM Neue", "DejaVu Sans", "Liberation Sans", sans-serif;
+  font-weight: 400;
+}
+
+.md-header,
+.md-tabs,
+.md-typeset {
+  font-family: "RM Neue", "DejaVu Sans", "Liberation Sans", sans-serif;
 }
 
 .md-grid {
@@ -77,9 +98,17 @@ body {
 
 .md-typeset h1 {
   margin: 1.5rem 0 1.5rem;
-  font-weight: 600;
+  font-family: "Libre Baskerville", "Liberation Serif", "DejaVu Serif", serif;
+  font-weight: 400;
   letter-spacing: -0.02em;
   line-height: 1.2;
+}
+
+.md-typeset h2,
+.md-typeset h3,
+.md-code__button,
+button {
+  font-weight: 600;
 }
 
 .md-typeset h2 {
@@ -139,6 +168,13 @@ body {
 .md-tabs__link:focus-visible {
   outline: 2px solid var(--fg-focus-header);
   outline-offset: 3px;
+}
+
+.md-typeset code,
+.md-typeset pre,
+.md-typeset .highlight,
+.md-typeset kbd {
+  font-family: "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace;
 }
 
 .md-typeset pre,

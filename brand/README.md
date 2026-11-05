@@ -22,7 +22,9 @@ Edit an SVG, then export the PNG again. The transparent PNGs are the files to up
 
 The icon is geometry drawn for Ferroguard: two uprights and one crossbar. It is not a shield.
 
-The wordmark is the word ferroguard set as SVG text in DejaVu Sans, the Bitstream Vera derivative shipped with Debian. The font file is not embedded. Liberation Sans is the fallback named in the SVG. No commercial font was outlined or copied.
+The wordmark is the word ferroguard set as SVG text in Libre Baskerville. The font file is `docs/assets/fonts/libre-baskerville/LibreBaskerville[wght].ttf`, redistributed with its SIL Open Font License notice in `OFL.txt`. Liberation Serif and DejaVu Serif are named as fallbacks. The font software was not modified, so the reserved name stays.
+
+RM Neue is not in this repository. CoType Foundry licenses it for a fee. The web licence is a single domain and `@font-face` only, and it forbids making the files available to third parties. A desktop licence does not cover a website. The trial licence is internal and non-commercial, and it forbids public websites and redistribution. No licensed WOFF or WOFF2 files were supplied, so none are embedded. Body, navigation, and buttons name RM Neue first and then DejaVu Sans and Liberation Sans, which are the faces actually rendered.
 
 ## Colour
 
