@@ -1,0 +1,176 @@
+/*
+  Main colour: iron blue #245E78, chosen for Ferroguard.
+  Accent: that hue plus 137.5 degrees, at the same saturation and lightness.
+  Support: the same hue and lightness, with 40% of the main saturation.
+  The golden angle is about 137.5 degrees. It is not a contrast ratio.
+  Links, buttons, and focus use the tokens below, checked on their own backgrounds.
+  Page surfaces stay neutral. The three derived colours do not share the page.
+*/
+
+:root {
+  --fg-main: #245e78;
+  --fg-accent: #782446;
+  --fg-support: #3d545f;
+  --fg-paper: #f4f6f7;
+  --fg-ink: #1b1f24;
+  --fg-muted: #515c64;
+  --fg-line: #d5dce1;
+  --fg-code-bg: #f7f8f9;
+  --fg-header: #1b1f24;
+  --fg-header-fg: #f4f6f7;
+  --fg-link: #245e78;
+  --fg-link-hover: #1c4a5e;
+  --fg-focus: #782446;
+  --fg-focus-header: #d0628e;
+  --fg-button-fg: #1b1f24;
+  --fg-button-bg: #f7f8f9;
+  --fg-button-fg-hover: #245e78;
+  --fg-button-bg-hover: #f7f8f9;
+  --md-default-bg-color: var(--fg-paper);
+  --md-default-fg-color: var(--fg-ink);
+  --md-primary-fg-color: var(--fg-header);
+  --md-accent-fg-color: var(--fg-focus);
+  --md-typeset-a-color: var(--fg-link);
+}
+
+[data-md-color-scheme="slate"] {
+  --fg-paper: #12161a;
+  --fg-ink: #f3f5f6;
+  --fg-muted: #c3cbcf;
+  --fg-line: #2c343c;
+  --fg-code-bg: #1a1f24;
+  --fg-header: #1b1f24;
+  --fg-header-fg: #f4f6f7;
+  --fg-link: #62aed0;
+  --fg-link-hover: #89c2dc;
+  --fg-focus: #d0628e;
+  --fg-button-fg: #f3f5f6;
+  --fg-button-bg: #1a1f24;
+  --fg-button-fg-hover: #62aed0;
+  --fg-button-bg-hover: #1a1f24;
+  --md-default-bg-color: var(--fg-paper);
+  --md-default-fg-color: var(--fg-ink);
+  --md-primary-fg-color: var(--fg-header);
+  --md-accent-fg-color: var(--fg-focus);
+  --md-typeset-a-color: var(--fg-link);
+}
+
+@font-face {
+  font-family: "Libre Baskerville";
+  src: url("../assets/fonts/libre-baskerville/LibreBaskerville[wght].ttf") format("truetype");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+body {
+  background-color: var(--fg-paper);
+  font-family: "DejaVu Sans", "Liberation Sans", system-ui, sans-serif;
+  font-weight: 400;
+}
+
+.md-header,
+.md-tabs,
+.md-typeset {
+  font-family: "DejaVu Sans", "Liberation Sans", system-ui, sans-serif;
+}
+
+.md-grid {
+  max-width: 52rem;
+}
+
+.md-typeset {
+  font-size: 1.02rem;
+  line-height: 1.75;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  color: var(--fg-ink);
+}
+
+.md-typeset h1 {
+  margin: 1.5rem 0 1.5rem;
+  font-family: "Libre Baskerville", "Liberation Serif", "DejaVu Serif", serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.md-typeset h2 {
+  margin-top: 2.75rem;
+}
+
+.md-typeset p,
+.md-typeset li {
+  max-width: 40rem;
+}
+
+.md-typeset a {
+  color: var(--fg-link);
+}
+
+.md-typeset a:hover {
+  color: var(--fg-link-hover);
+}
+
+.md-typeset .highlight {
+  margin: 2.25rem 0;
+}
+
+.md-header {
+  background-color: var(--fg-header);
+  box-shadow: none;
+}
+
+.md-header__title,
+.md-header__button,
+.md-tabs__link {
+  color: var(--fg-header-fg);
+}
+
+.md-tabs {
+  background-color: var(--fg-header);
+}
+
+.md-code__button {
+  color: var(--fg-button-fg);
+  background-color: var(--fg-button-bg);
+}
+
+.md-code__button:hover {
+  color: var(--fg-button-fg-hover);
+  background-color: var(--fg-button-bg-hover);
+}
+
+.md-code__button:focus-visible,
+.md-clipboard:focus-visible,
+.md-typeset a:focus-visible {
+  outline: 2px solid var(--fg-focus);
+  outline-offset: 3px;
+}
+
+.md-header a:focus-visible,
+.md-tabs__link:focus-visible {
+  outline: 2px solid var(--fg-focus-header);
+  outline-offset: 3px;
+}
+
+.md-typeset code,
+.md-typeset pre,
+.md-typeset .highlight,
+.md-typeset kbd {
+  font-family: "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace;
+}
+
+.md-typeset pre,
+.md-typeset .highlight {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.md-main__inner {
+  margin-top: 1.25rem;
+  margin-bottom: 4.5rem;
+}
