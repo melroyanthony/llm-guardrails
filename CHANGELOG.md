@@ -4,7 +4,7 @@
 
 ### Features
 
-* A static Ferroguard site lives in `docs/` and builds with MkDocs Material. `pip install ferroguard` and `import llm_guardrails` stay distinct. The homepage example is a script CI runs. The homepage is the install command, then that example.
+* A static Ferroguard site lives in `docs/` and builds with MkDocs Material. `pip install ferroguard` and `import llm_guardrails` stay distinct. The homepage example is a script CI runs. The homepage is the install command, then that example. The proposed palette is an iron blue, that hue plus 137.5 degrees, and the same blue at 40% saturation. Page surfaces stay neutral.
 
 ## [0.3.2](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.2) (2026-11-05)
 

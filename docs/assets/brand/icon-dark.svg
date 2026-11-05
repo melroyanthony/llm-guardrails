@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="fg-icon-dark-title">
   <title id="fg-icon-dark-title">Ferroguard icon for dark backgrounds</title>
-  <rect x="10" y="8" width="7" height="48" rx="1.5" fill="#f3efe8"/>
-  <rect x="47" y="8" width="7" height="48" rx="1.5" fill="#f3efe8"/>
-  <rect x="10" y="28" width="44" height="7" rx="1.5" fill="#e0a07a"/>
+  <rect x="10" y="8" width="7" height="48" rx="1.5" fill="#93adb9"/>
+  <rect x="47" y="8" width="7" height="48" rx="1.5" fill="#93adb9"/>
+  <rect x="10" y="28" width="44" height="7" rx="1.5" fill="#62aed0"/>
 </svg>
