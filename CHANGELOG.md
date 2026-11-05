@@ -5,6 +5,7 @@
 ### Bug Fixes
 
 * Release wheel jobs no longer fail after the wheel is uploaded. Those jobs do not install Python packages with uv, so setup-uv no longer tries to save a dependency cache they never create.
+* An unfinished GitHub Release is published again from its existing tag. The workflow does not create a replacement tag. `v0.3.1` stays `v0.3.1`.
 
 ## [0.3.1](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.1) (2026-11-05)
 

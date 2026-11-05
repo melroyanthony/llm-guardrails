@@ -107,6 +107,24 @@ environment's deployment branches to `main`, so a workflow on another branch
 cannot use the trusted publisher. Use a pending publisher if the PyPI project
 does not exist yet.
 
+## Unfinished release
+
+If the tag and GitHub Release exist but the Release has no assets, the wheel
+or publish jobs did not finish. The next run reuses that tag. It does not
+create, move, or delete a tag. `v0.3.1` is that release: the tag is
+`59888df627d42097d66c895f048d10bae1f5fc4d`, and PyPI upload never started.
+
+Do not re-run the failed workflow as the fix. That run is pinned to the
+workflow file from before this change. Do not delete the tag. After this
+change is on `main`, the next push reuses `v0.3.1` because that Release has
+no assets. A later push cuts the next version only after `v0.3.1` has an
+asset (the SBOM).
+
+To retry without another commit, run this workflow with `workflow_dispatch`
+from `main` and set `recover_tag` to `v0.3.1`. The dispatch job has
+`contents: read` only. It refuses any tag except the latest unfinished
+`vX.Y.Z` tag on `main`.
+
 ## Local checks
 
 These do not push:
@@ -114,4 +132,5 @@ These do not push:
 ```bash
 python3 scripts/release_subject.py --self-test
 python3 scripts/release_publish.py --self-test
+python3 scripts/release_recover.py --self-test
 ```

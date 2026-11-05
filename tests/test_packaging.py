@@ -57,6 +57,15 @@ def test_release_publishes_inside_release_yml():
     assert "ferroguard.spdx.json" in sbom
     wheels_job = jobs.split("\n  wheels:", 1)[1].split("\n  sdist:", 1)[0]
     assert "enable-cache: false" in wheels_job
+    recover_job = jobs.split("\n  recover:", 1)[1].split("\n  selected:", 1)[0]
+    assert "contents: read" in recover_job
+    assert "contents: write" not in recover_job
+    assert "id-token:" not in recover_job
+    assert "workflow_dispatch:" in header
+    assert "github.event_name == 'push'" in jobs.split("\n  recover:", 1)[0]
+    source = (ROOT / "scripts" / "release_recover.py").read_text(encoding="utf-8")
+    assert "git push" not in source
+    assert "git tag" not in source
     assert "maturin sdist" in jobs
     assert "PYPI_TOKEN" not in workflow
     assert "password:" not in workflow
