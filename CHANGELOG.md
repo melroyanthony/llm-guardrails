@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+* The demo API limits request bodies in ASGI middleware. Empty chunks do not grow the buffer. Stored PII maps are capped by count and by UTF-8 bytes. A map that does not fit returns HTTP 503 and does not evict another caller's id.
+
 ## [0.3.3](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.3) (2026-11-05)
 
 ### Features

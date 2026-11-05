@@ -11,29 +11,43 @@ POST /guard/output  -- Run output guardrails (validation + bias scoring + PII re
 POST /guard/full    -- Full pipeline: input guards -> simulated LLM -> output guards
 GET  /health        -- Health check
 
-``/guard/input`` returns an opaque ``pii_mapping_id``. A non-empty map stays in
-this process for ``MAPPING_TTL_SECONDS`` and is popped on the first
-``/guard/output`` call. The id is not shared across workers.
+``/guard/input`` returns an opaque ``pii_mapping_id`` when the map fits:
+at most 1024 maps, 262144 UTF-8 bytes in total, and 65536 bytes for one
+map. Otherwise the response is HTTP 503 and this call stores nothing.
+A stored id stays in this process for ``MAPPING_TTL_SECONDS`` and is
+popped on the first ``/guard/output`` call. It is not shared across workers.
 """
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.pii_store import MappingStore
+from api.body_limit import LimitRequestBody
+from api.pii_store import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_ENTRIES,
+    DEFAULT_MAX_ENTRY_BYTES,
+    MappingStore,
+    mapping_nbytes,
+)
 from llm_guardrails.pipeline import GuardrailsPipeline
 
 MAX_TEXT_LENGTH = 8_000
 MAX_BODY_BYTES = 32 * 1024
 MAPPING_TTL_SECONDS = 15 * 60
-MAX_MAPPING_ENTRIES = 10_000
+MAX_MAPPING_ENTRIES = DEFAULT_MAX_ENTRIES
+MAX_MAPPING_BYTES = DEFAULT_MAX_BYTES
+MAX_MAPPING_ENTRY_BYTES = DEFAULT_MAX_ENTRY_BYTES
 
 _pipeline: GuardrailsPipeline | None = None
-_store = MappingStore(max_entries=MAX_MAPPING_ENTRIES)
+_store = MappingStore(
+    max_entries=MAX_MAPPING_ENTRIES,
+    max_bytes=MAX_MAPPING_BYTES,
+    max_entry_bytes=MAX_MAPPING_ENTRY_BYTES,
+)
 
 
 def package_version() -> str:
@@ -67,37 +81,7 @@ app = FastAPI(
     ),
     version=package_version(),
 )
-
-
-def _body_too_large() -> JSONResponse:
-    return JSONResponse(
-        status_code=413,
-        content={"detail": f"Request body exceeds {MAX_BODY_BYTES} bytes."},
-    )
-
-
-@app.middleware("http")
-async def limit_request_body(request: Request, call_next):
-    content_length = request.headers.get("content-length")
-    if content_length is not None:
-        try:
-            declared = int(content_length)
-        except ValueError:
-            declared = None
-        if declared is not None and declared > MAX_BODY_BYTES:
-            return _body_too_large()
-    # Count chunked bodies as they arrive. Stop at the cap instead of reading
-    # a request that never sent Content-Length all the way through.
-    received = 0
-    chunks: list[bytes] = []
-    async for chunk in request.stream():
-        received += len(chunk)
-        if received > MAX_BODY_BYTES:
-            return _body_too_large()
-        if chunk:
-            chunks.append(chunk)
-    request._body = b"".join(chunks)
-    return await call_next(request)
+app.add_middleware(LimitRequestBody, max_bytes=MAX_BODY_BYTES)
 
 
 class _RequestModel(BaseModel):
@@ -169,9 +153,30 @@ class HealthResponse(BaseModel):
     version: str
 
 
+def _capacity_detail() -> str:
+    return (
+        "PII mapping store cannot keep this map "
+        f"({_store.max_entries} maps, {_store.max_bytes} bytes total, "
+        f"{_store.max_entry_bytes} bytes for one map)."
+    )
+
+
+def _remember_mapping(mapping: dict[str, str]) -> str | None:
+    """Store a map. An empty map returns None. A map that does not fit is 503."""
+    if not mapping:
+        return None
+    size = mapping_nbytes(mapping)
+    if size > _store.max_entry_bytes or size > _store.max_bytes:
+        raise HTTPException(status_code=503, detail=_capacity_detail())
+    stored = _store.put(mapping, MAPPING_TTL_SECONDS)
+    if stored is None:
+        raise HTTPException(status_code=503, detail=_capacity_detail())
+    return stored
+
+
 def _input_response(text: str, *, remember: bool) -> tuple[InputResponse, dict[str, str], bool]:
     pre = get_pipeline().pre_process(text)
-    mapping_id = _store.put(pre.pii_mapping, MAPPING_TTL_SECONDS) if remember else None
+    mapping_id = _remember_mapping(pre.pii_mapping) if remember else None
     response = InputResponse(
         sanitised_text=pre.sanitised_text,
         pii_mapping_id=mapping_id,
@@ -213,7 +218,17 @@ async def health():
     return HealthResponse(status="ok", version=package_version())
 
 
-@app.post("/guard/input", response_model=InputResponse, tags=["guardrails"])
+@app.post(
+    "/guard/input",
+    response_model=InputResponse,
+    tags=["guardrails"],
+    description=(
+        "Run input-side guardrails. A non-empty placeholder map is stored only "
+        f"when it fits: {MAX_MAPPING_ENTRIES} maps, {MAX_MAPPING_BYTES} UTF-8 bytes "
+        f"in total, and {MAX_MAPPING_ENTRY_BYTES} bytes for one map. "
+        "If it does not fit, the response is 503 and this call stores nothing."
+    ),
+)
 async def guard_input(req: InputRequest):
     """Run input-side guardrails on user text."""
     response, _mapping, _blocked = _input_response(req.text, remember=True)
