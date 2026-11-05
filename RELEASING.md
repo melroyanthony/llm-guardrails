@@ -86,9 +86,14 @@ and `actions: read` (so it can download this run's artifacts). PEP 740
 attestations are signed with that OIDC token. The job does not have
 `attestations: write` or `contents: write`. There is no PyPI API token.
 
-A later job, which `needs: pypi` and has `contents: write`, writes an SPDX
-SBOM of the same artifacts and attaches `ferroguard.spdx.json` to the GitHub
-Release.
+A later job has `contents: write` and `actions: read`. When this run built
+the wheels, it writes an SPDX SBOM with `output-file` and `artifact-name`
+both set to `ferroguard.spdx.json`, checks that the file exists, and uploads
+it with `gh release upload --repo`. The repository comes from
+`github.repository`, so the upload does not need `git` to infer it. When PyPI
+already succeeded and that upload did not, the job downloads the saved
+artifact instead of building again. The failed v0.3.1 run stored that file
+as `llm-guardrails-sbom.spdx.json`.
 
 The publish job uses the GitHub environment `pypi`. Before the first release,
 register a trusted publisher on PyPI:
@@ -109,21 +114,41 @@ does not exist yet.
 
 ## Unfinished release
 
-If the tag and GitHub Release exist but the Release has no assets, the wheel
-or publish jobs did not finish. The next run reuses that tag. It does not
-create, move, or delete a tag. `v0.3.1` is that release: the tag is
-`59888df627d42097d66c895f048d10bae1f5fc4d`, and PyPI upload never started.
+`v0.3.1` is that release. The tag is
+`59888df627d42097d66c895f048d10bae1f5fc4d`. Run
+[42093909645](https://github.com/melroyanthony/llm-guardrails/actions/runs/42093909645)
+built the wheels, and its Publish to PyPI job succeeded. Release SBOM failed
+before any asset was attached: `gh release upload` had no checkout, so it
+could not infer the repository, and it named `ferroguard.spdx.json` while
+the action stored artifact `llm-guardrails-sbom.spdx.json` (artifact
+`13447181343`). The GitHub Release still has no assets.
 
-Do not re-run the failed workflow as the fix. That run is pinned to the
-workflow file from before this change. Do not delete the tag. After this
-change is on `main`, the next push reuses `v0.3.1` because that Release has
-no assets. A later push cuts the next version only after `v0.3.1` has an
-asset (the SBOM).
+Do not re-run that workflow. It is pinned to the file from before this
+change. Do not delete or move the tag. Do not dispatch a run from this
+branch. After this change is on `main`, the next push calls
+`release_recover.py --resolve`. That sees the tag, the empty asset list, and
+the successful Publish to PyPI job, and it returns action `sbom`. The release
+job then exits without `release_publish.py`, so it does not create a commit
+or a tag. `selected` outputs `mode=sbom` and `tag=v0.3.1`. The wheel, sdist,
+and PyPI jobs stay skipped. The SBOM job checks out the script only, finds
+the newest completed Release run whose Publish to PyPI job succeeded and
+whose Release SBOM job did not, downloads `llm-guardrails-sbom.spdx.json`,
+checks that the file exists, and runs:
+
+```text
+gh release upload v0.3.1 sbom-in/llm-guardrails-sbom.spdx.json --repo melroyanthony/llm-guardrails --clobber
+```
+
+`v0.3.1` stays at `59888df627d42097d66c895f048d10bae1f5fc4d`. A later push cuts
+the next version only after that SBOM asset exists. A future unfinished tag
+whose PyPI job did not succeed still returns `recover` and rebuilds the
+wheels. `v0.3.1` returns `sbom`, so its wheel jobs stay skipped.
 
 To retry without another commit, run this workflow with `workflow_dispatch`
-from `main` and set `recover_tag` to `v0.3.1`. The dispatch job has
-`contents: read` only. It refuses any tag except the latest unfinished
-`vX.Y.Z` tag on `main`.
+from `main`, set `recover_tag` to `v0.3.1`, and leave `recover_mode` at
+`sbom`. The dispatch job has `contents: read` only. It refuses any tag
+except the latest unfinished `vX.Y.Z` tag on `main`, and it refuses
+`recover_mode=wheels` while PyPI has already succeeded.
 
 ## Local checks
 
