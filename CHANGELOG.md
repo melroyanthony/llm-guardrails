@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.3.2](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.2) (2026-11-05)
+
 ### Bug Fixes
 
 * The demo image pins its Python and uv images by digest and checks the rustup-init checksum before running it.
