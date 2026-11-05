@@ -22,7 +22,7 @@ def _run(path: Path) -> str:
 
 
 def test_homepage_includes_and_runs_the_quickstart():
-    assert "examples/quickstart.py" in INDEX
+    assert '--8<-- "examples/quickstart.py"' in INDEX
     assert "pip install ferroguard" in INDEX
     assert "llm_guardrails" in INDEX
     stdout = _run(QUICKSTART)
@@ -32,5 +32,7 @@ def test_homepage_includes_and_runs_the_quickstart():
 
 
 def test_restore_example_runs():
-    assert "examples/restore.py" in (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
+    install = (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
+    assert '--8<-- "examples/quickstart.py"' in install
+    assert '--8<-- "examples/restore.py"' in install
     assert _run(RESTORE) == "Noted.\nTrue\n0.0\n"
