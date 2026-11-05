@@ -41,10 +41,14 @@ def test_text_colours_clear_wcag_aa():
     assert _contrast(ink, paper) >= 4.5
     assert _contrast(muted, paper) >= 4.5
     assert _contrast(copper, paper) >= 4.5
-    assert _contrast("#fffaf6", "#7d4330") >= 4.5
-    assert _contrast("#1c2126", "#e0a07a") >= 4.5
     assert _contrast("#f3efe8", "#171b1e") >= 4.5
-    assert "#7d4330" in CSS
+    assert _contrast("#e0a07a", "#171b1e") >= 4.5
+    assert _var("--fg-graphite") == "#243038"
+    assert _var("--fg-copper") == "#8d4f34"
+    assert _var("--fg-paper") == "#f6f4f0"
     assert "#e0a07a" in CSS
     assert "overflow-x: auto" in CSS
     assert "focus-visible" in CSS
+    assert "fg-features" not in CSS
+    assert "grid-template-columns" not in CSS
+    assert "color: var(--fg-ink)" in CSS

@@ -16,7 +16,6 @@ theme:
   font: false
   features:
     - content.code.copy
-    - navigation.footer
     - navigation.tabs
     - navigation.top
     - search.suggest

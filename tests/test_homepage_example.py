@@ -31,6 +31,15 @@ def test_homepage_includes_and_runs_the_quickstart():
     assert "blocked False" in INDEX
 
 
+def test_homepage_is_install_then_code():
+    assert "fg-features" not in INDEX
+    assert "fg-kicker" not in INDEX
+    assert "fg-hero" not in INDEX
+    install_at = INDEX.index("pip install ferroguard")
+    example_at = INDEX.index('--8<-- "examples/quickstart.py"')
+    assert install_at < example_at
+
+
 def test_restore_example_runs():
     install = (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
     assert '--8<-- "examples/quickstart.py"' in install
