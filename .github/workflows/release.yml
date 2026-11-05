@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      recover_tag:
+        description: Existing vX.Y.Z tag to publish again. Does not create or move a tag.
+        required: true
+        type: string
 
 permissions: {}
 
@@ -12,7 +18,7 @@ concurrency:
 
 jobs:
   release:
-    if: github.actor != 'github-actions[bot]' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, '🔖 chore(release):')
+    if: github.event_name == 'push' && github.actor != 'github-actions[bot]' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, '🔖 chore(release):')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -32,6 +38,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          python3 scripts/release_recover.py --resolve > /tmp/recover.json
+          recover_action="$(python3 -c 'import json; print(json.load(open("/tmp/recover.json"))["action"])')"
+          if [ "$recover_action" = "recover" ]; then
+            tag="$(python3 -c 'import json; print(json.load(open("/tmp/recover.json"))["tag"])')"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+            echo "reusing existing tag ${tag}; not creating a replacement"
+            exit 0
+          fi
           python3 scripts/release_subject.py \
             --decide \
             --since-tag \
@@ -54,12 +69,78 @@ jobs:
           echo "published=true" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
+  # Manual retry for an unfinished tag. contents: read only, so this job
+  # cannot create or move a tag. Dispatch it from main; do not invent a tag.
+  recover:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      published: ${{ steps.check.outputs.published }}
+      tag: ${{ steps.check.outputs.tag }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Require the existing unfinished tag
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RECOVER_TAG: ${{ github.event.inputs.recover_tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_recover.py --tag "$RECOVER_TAG" > /tmp/recover.json
+          tag="$(python3 -c 'import json; print(json.load(open("/tmp/recover.json"))["tag"])')"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  # One tag for the rest of the run: a new release, or the unfinished tag.
+  selected:
+    name: Select tag
+    needs: [release, recover]
+    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.recover.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      published: ${{ steps.pick.outputs.published }}
+      tag: ${{ steps.pick.outputs.tag }}
+    permissions:
+      contents: read
+    steps:
+      - name: Pick the tag
+        id: pick
+        env:
+          RELEASE_PUBLISHED: ${{ needs.release.outputs.published }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+          RECOVER_PUBLISHED: ${{ needs.recover.outputs.published }}
+          RECOVER_TAG: ${{ needs.recover.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE_PUBLISHED" = "true" ]; then
+            tag="$RELEASE_TAG"
+          elif [ "$RECOVER_PUBLISHED" = "true" ]; then
+            tag="$RECOVER_TAG"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "refusing unexpected tag: $tag" >&2
+            exit 1
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   # The version commit is pushed with GITHUB_TOKEN, so a workflow that
   # triggers on the tag never starts. Wheels and PyPI stay in this run.
   wheels:
     name: Wheel ${{ matrix.id }}
-    needs: release
-    if: needs.release.outputs.published == 'true'
+    needs: selected
+    if: ${{ !cancelled() && needs.selected.result == 'success' && needs.selected.outputs.published == 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -92,13 +173,16 @@ jobs:
       - name: Checkout the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release.outputs.tag }}
+          ref: ${{ needs.selected.outputs.tag }}
 
       - name: Install uv and Python 3.11
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.7"
           python-version: "3.11"
+          # This job never runs uv, so the cache directory is never created.
+          # setup-uv's default "auto" cache then fails the post step.
+          enable-cache: false
 
       - name: Build the abi3 wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -117,8 +201,8 @@ jobs:
 
   sdist:
     name: sdist
-    needs: release
-    if: needs.release.outputs.published == 'true'
+    needs: selected
+    if: ${{ !cancelled() && needs.selected.result == 'success' && needs.selected.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -127,7 +211,7 @@ jobs:
       - name: Checkout the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release.outputs.tag }}
+          ref: ${{ needs.selected.outputs.tag }}
 
       - name: Install uv and Python 3.11
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -147,13 +231,13 @@ jobs:
 
   pypi:
     name: Publish to PyPI
-    needs: [release, wheels, sdist]
-    if: needs.release.outputs.published == 'true'
+    needs: [selected, wheels, sdist]
+    if: ${{ !cancelled() && needs.selected.result == 'success' && needs.selected.outputs.published == 'true' && needs.wheels.result == 'success' && needs.sdist.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: pypi
     outputs:
-      tag: ${{ needs.release.outputs.tag }}
+      tag: ${{ needs.selected.outputs.tag }}
     permissions:
       id-token: write
       # Same-run artifact download uses the Actions API.
@@ -243,7 +327,7 @@ jobs:
   sbom:
     name: Release SBOM
     needs: pypi
-    if: needs.pypi.result == 'success'
+    if: ${{ !cancelled() && needs.pypi.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
