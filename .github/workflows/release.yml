@@ -11,8 +11,9 @@ on:
         type: string
       recover_mode:
         description: >
-          sbom attaches the saved SBOM only. wheels rebuilds distributions
-          only when PyPI did not succeed.
+          sbom regenerates the SBOM from the published distributions and
+          replaces an empty one. wheels rebuilds distributions only when
+          PyPI did not succeed.
         required: false
         default: sbom
         type: choice
@@ -377,59 +378,51 @@ jobs:
       contents: write
       actions: read
     steps:
-      # Full history binds each Release run to the tag it published.
       # The upload passes --repo from github.repository and is tested
       # with no checkout present.
       - name: Checkout the upload script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Download wheels
-        if: needs.selected.outputs.mode != 'sbom'
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: wheel-*
-          path: dist
-          merge-multiple: true
+      - name: Install Syft 1.54.0
+        run: |
+          set -euo pipefail
+          archive="syft_1.54.0_linux_amd64.tar.gz"
+          curl -fsSL -o "/tmp/${archive}" \
+            "https://github.com/anchore/syft/releases/download/v1.54.0/${archive}"
+          echo "54a87372498168b2d033e876fd41fa4e8035b872699e525a57046e1f2f09c860  /tmp/${archive}" \
+            | sha256sum -c
+          mkdir -p "$HOME/.local/bin"
+          tar -C "$HOME/.local/bin" -xzf "/tmp/${archive}" syft
+          "$HOME/.local/bin/syft" version
 
-      - name: Download the sdist
-        if: needs.selected.outputs.mode != 'sbom'
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: sdist
-          path: dist
-
-      - name: Generate an SPDX SBOM
-        if: needs.selected.outputs.mode != 'sbom'
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          path: dist
-          format: spdx-json
-          artifact-name: ferroguard.spdx.json
-          output-file: ferroguard.spdx.json
-          upload-artifact: true
-          upload-release-assets: false
+      - name: Generate the SPDX SBOM from the published distributions
+        env:
+          SBOM_TAG: ${{ needs.selected.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_sbom.py \
+            --generate \
+            --version "${SBOM_TAG#v}" \
+            --output ferroguard.spdx.json \
+            --syft "$HOME/.local/bin/syft"
 
       - name: Attach the SBOM to the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           SBOM_TAG: ${{ needs.selected.outputs.tag }}
-          SBOM_MODE: ${{ needs.selected.outputs.mode }}
         run: |
           set -euo pipefail
-          if [ "$SBOM_MODE" = "sbom" ]; then
-            python3 scripts/release_recover.py \
-              --upload-saved-sbom \
-              --tag "$SBOM_TAG" \
-              --repo "$GH_REPO" \
-              --dest sbom-in
-          else
-            python3 scripts/release_recover.py \
-              --upload-sbom \
-              --tag "$SBOM_TAG" \
-              --repo "$GH_REPO" \
-              --file ferroguard.spdx.json
-          fi
+          python3 scripts/release_recover.py \
+            --upload-sbom \
+            --tag "$SBOM_TAG" \
+            --repo "$GH_REPO" \
+            --file ferroguard.spdx.json
+          python3 scripts/release_sbom.py \
+            --delete-invalid \
+            --tag "$SBOM_TAG" \
+            --repo "$GH_REPO" \
+            --version "${SBOM_TAG#v}"
