@@ -1,0 +1,73 @@
+site_name: Ferroguard
+site_description: >-
+  A Python library that redacts some PII, scores a few prompt patterns,
+  and checks model output with a small set of rules.
+site_url: https://melroyanthony.github.io/llm-guardrails/
+site_author: Melroy Anthony
+repo_url: https://github.com/melroyanthony/llm-guardrails
+repo_name: melroyanthony/llm-guardrails
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Melroy Anthony
+
+theme:
+  name: material
+  logo: assets/brand/icon-dark.svg
+  favicon: assets/brand/icon.svg
+  font: false
+  features:
+    - content.code.copy
+    - navigation.footer
+    - navigation.tabs
+    - navigation.top
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/install.js
+
+markdown_extensions:
+  - attr_list
+  - md_in_html
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: docs
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Guards: guides/guards.md
+  - Limits: guides/limits.md
+  - Demo: demo.md
+
+plugins:
+  - search
+
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn

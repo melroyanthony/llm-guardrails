@@ -1,0 +1,87 @@
+name: Docs
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build the static site
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and Python 3.14
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Read Rust channel
+        id: rust-channel
+        run: |
+          channel="$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)"
+          if [[ ! "$channel" =~ ^[0-9A-Za-z._+-]+$ ]]; then
+            echo "rust-toolchain.toml channel is missing or invalid: ${channel:-<empty>}" >&2
+            exit 1
+          fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ steps.rust-channel.outputs.channel }}
+
+      - name: Install the library and the docs tools
+        run: uv sync --locked --all-extras --group docs
+
+      - name: Run the homepage example
+        run: uv run python docs/examples/quickstart.py
+
+      - name: Build the site
+        run: uv run mkdocs build --strict
+
+      - name: Check links and the project base path
+        run: uv run python scripts/check_docs_site.py
+
+      - name: Upload the built site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  # Publishes only when someone runs this workflow by hand.
+  # Settings → Pages → Source must be GitHub Actions first.
+  # A push to main does not deploy, so a missing Pages setting
+  # does not fail the branch.
+  deploy:
+    name: Deploy GitHub Pages
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

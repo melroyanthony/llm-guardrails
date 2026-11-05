@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+* A static Ferroguard site lives in `docs/` and builds with MkDocs Material. `pip install ferroguard` and `import llm_guardrails` stay distinct. The homepage example is a script CI runs.
+
 ## [0.3.2](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.2) (2026-11-05)
 
 ### Bug Fixes

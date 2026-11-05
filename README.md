@@ -34,6 +34,9 @@ import llm_guardrails
 
 The project on PyPI is `ferroguard`. The import name stays `llm_guardrails`.
 Wheels are abi3 for Python 3.11 and newer, so one wheel covers 3.11 through 3.14.
+The same install and example are in `docs/`. GitHub Pages is not turned on for this
+repository. After it is set to deploy from GitHub Actions, the site address is
+`https://melroyanthony.github.io/llm-guardrails/`.
 
 ### Run It
 
