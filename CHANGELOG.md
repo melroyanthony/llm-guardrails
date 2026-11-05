@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.3.1](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.1) (2026-11-05)
+
 ### Breaking changes
 
 * The PyPI distribution name is `ferroguard`. Install with `pip install ferroguard` and keep `import llm_guardrails`. `importlib.metadata.version("llm_guardrails")` no longer finds the package; use `ferroguard`. `GET /health` reports that distribution version.
