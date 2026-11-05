@@ -24,7 +24,7 @@ The icon is geometry drawn for Ferroguard: two uprights and one crossbar. It is 
 
 The wordmark is the word ferroguard set as SVG text in Libre Baskerville. The font file is `docs/assets/fonts/libre-baskerville/LibreBaskerville[wght].ttf`, redistributed with its SIL Open Font License notice in `OFL.txt`. Liberation Serif and DejaVu Serif are named as fallbacks. The font software was not modified, so the reserved name stays.
 
-RM Neue is not in this repository. CoType Foundry licenses it for a fee. The web licence is a single domain and `@font-face` only, and it forbids making the files available to third parties. A desktop licence does not cover a website. The trial licence is internal and non-commercial, and it forbids public websites and redistribution. No licensed WOFF or WOFF2 files were supplied, so none are embedded. Body, navigation, and buttons name RM Neue first and then DejaVu Sans and Liberation Sans, which are the faces actually rendered.
+Body text, navigation, and buttons use DejaVu Sans, then Liberation Sans, then `system-ui`. Code stays in DejaVu Sans Mono and Liberation Mono.
 
 ## Colour
 

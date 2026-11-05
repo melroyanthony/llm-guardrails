@@ -55,12 +55,6 @@
   --md-typeset-a-color: var(--fg-link);
 }
 
-/*
-  RM Neue Regular and RM Neue SemiBold are not in this repository.
-  CoType licenses them separately for one domain, and no licensed
-  WOFF or WOFF2 files are available here. The families after
-  "RM Neue" are the faces the page renders.
-*/
 @font-face {
   font-family: "Libre Baskerville";
   src: url("../assets/fonts/libre-baskerville/LibreBaskerville[wght].ttf") format("truetype");
@@ -71,14 +65,14 @@
 
 body {
   background-color: var(--fg-paper);
-  font-family: "RM Neue", "DejaVu Sans", "Liberation Sans", sans-serif;
+  font-family: "DejaVu Sans", "Liberation Sans", system-ui, sans-serif;
   font-weight: 400;
 }
 
 .md-header,
 .md-tabs,
 .md-typeset {
-  font-family: "RM Neue", "DejaVu Sans", "Liberation Sans", sans-serif;
+  font-family: "DejaVu Sans", "Liberation Sans", system-ui, sans-serif;
 }
 
 .md-grid {
@@ -102,13 +96,6 @@ body {
   font-weight: 400;
   letter-spacing: -0.02em;
   line-height: 1.2;
-}
-
-.md-typeset h2,
-.md-typeset h3,
-.md-code__button,
-button {
-  font-weight: 600;
 }
 
 .md-typeset h2 {

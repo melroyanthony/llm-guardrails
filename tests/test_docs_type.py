@@ -1,4 +1,4 @@
-"""The site ships Libre Baskerville and does not ship RM Neue."""
+"""The site ships Libre Baskerville and an open sans stack."""
 
 from pathlib import Path
 
@@ -18,15 +18,17 @@ def test_libre_baskerville_keeps_its_licence_notice():
     assert "Libre Baskerville" in WORDMARK
 
 
-def test_rm_neue_is_not_shipped_and_the_fallback_is_named():
+def test_body_uses_the_open_sans_stack():
     shipped = [
         path.name.lower()
         for path in (ROOT / "docs").rglob("*")
         if path.suffix.lower() in {".ttf", ".otf", ".woff", ".woff2"}
     ]
+    readme = (ROOT / "brand" / "README.md").read_text(encoding="utf-8")
     assert shipped == ["librebaskerville[wght].ttf"]
-    assert "RM Neue" in CSS
-    assert "not in this repository" in CSS
-    assert '"DejaVu Sans"' in CSS
+    assert "RM Neue" not in CSS
+    assert "RM Neue" not in readme
+    assert "font-weight: 600" not in CSS
+    assert '"DejaVu Sans", "Liberation Sans", system-ui, sans-serif' in CSS
     assert "DejaVu Sans Mono" in CSS
     assert "font-display: swap" in CSS
