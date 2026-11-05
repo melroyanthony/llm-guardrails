@@ -72,6 +72,7 @@ jobs:
           python3 scripts/release_subject.py --self-test
           python3 scripts/release_publish.py --self-test
           python3 scripts/release_recover.py --self-test
+          python3 scripts/release_sbom.py --self-test
           python3 scripts/test_guardrails.py
 
   rust:

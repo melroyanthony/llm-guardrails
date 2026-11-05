@@ -20,6 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from release_sbom import assert_release_sbom, replacement_needed, version_of
 from release_subject import RELEASE_SUBJECT, ROOT, strip_emoji
 
 TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+)$")
@@ -42,20 +43,24 @@ def plan(
     asset_count: int,
     *,
     pypi_succeeded: bool = False,
+    sbom_acceptable: bool = True,
 ) -> dict:
     """Return sbom, recover, or continue for one tag.
 
     An unfinished release is an existing ``vX.Y.Z`` tag whose commit is the
-    matching release commit, whose GitHub Release exists, and which has no
-    assets yet. SBOM-only recovery applies when PyPI already succeeded.
-    Otherwise the wheels are built again. Any asset means this tag is done.
+    matching release commit and whose GitHub Release exists. SBOM-only
+    recovery applies when PyPI already succeeded and the release has no
+    acceptable SBOM, including when the only asset is a directory-only scan.
+    That path does not build wheels. A release with an acceptable SBOM is done.
     """
     match = TAG_RE.fullmatch(tag.strip())
     version = release_version(subject)
-    if match and version == match.group(1) and release_exists and asset_count == 0:
-        if pypi_succeeded:
+    if match and version == match.group(1) and release_exists:
+        replace_sbom = asset_count == 0 or not sbom_acceptable
+        if replace_sbom and pypi_succeeded:
             return {"action": "sbom", "tag": tag.strip()}
-        return {"action": "recover", "tag": tag.strip()}
+        if asset_count == 0:
+            return {"action": "recover", "tag": tag.strip()}
     return {"action": "continue", "tag": ""}
 
 
@@ -177,6 +182,8 @@ def upload_argv(tag: str, path: Path, repo: str) -> list[str]:
 
 def upload_release_asset(tag: str, path: Path, repo: str, run=None) -> list[str]:
     argv = upload_argv(tag, path, repo)
+    document = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert_release_sbom(document, version_of(tag))
     result = (run or _run)(argv)
     if result.returncode != 0:
         raise SystemExit((result.stderr or result.stdout or "gh release upload failed").strip())
@@ -384,6 +391,47 @@ def _on_main(tag: str) -> bool:
     return result.returncode == 0
 
 
+def load_release_documents(tag: str, repo: str, run=None) -> list[dict]:
+    """Download attached SPDX assets. Read-only."""
+    repo = repo_name(repo)
+    runner = run or _run
+    payload = _json(runner, ["gh", "release", "view", tag, "--repo", repo, "--json", "assets"])
+    names = [
+        asset.get("name") or ""
+        for asset in payload.get("assets") or []
+        if (asset.get("name") or "").endswith(".spdx.json")
+    ]
+    if not names:
+        return []
+    with tempfile.TemporaryDirectory() as raw:
+        dest = Path(raw)
+        result = runner(
+            [
+                "gh",
+                "release",
+                "download",
+                tag,
+                "--repo",
+                repo,
+                "--dir",
+                str(dest),
+                "--pattern",
+                "*.spdx.json",
+                "--clobber",
+            ]
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "gh release download failed").strip()
+            raise SystemExit(detail)
+        documents = []
+        for name in names:
+            path = dest / name
+            if not path.is_file():
+                raise SystemExit(f"SBOM asset was not downloaded: {name}")
+            documents.append(json.loads(path.read_text(encoding="utf-8")))
+        return documents
+
+
 def _assets(tag: str) -> tuple[bool, int]:
     result = _run(["gh", "release", "view", tag, "--repo", repo_name(), "--json", "assets"])
     if result.returncode == 0:
@@ -439,8 +487,21 @@ def resolve(requested: str | None = None, expect: str | None = None) -> dict:
             raise SystemExit(f"refusing {requested}; it is not on origin/main")
         return {"action": "continue", "tag": ""}
     exists, count = _assets(tag)
-    pypi_succeeded = publish_succeeded(repo_name(), tag) if exists and count == 0 else False
-    decision = plan(tag, _subject(tag), exists, count, pypi_succeeded=pypi_succeeded)
+    acceptable = True
+    if exists and count and tag:
+        version = version_of(tag)
+        acceptable = not replacement_needed(load_release_documents(tag, repo_name()), version)
+    pypi_succeeded = False
+    if exists and (count == 0 or not acceptable):
+        pypi_succeeded = publish_succeeded(repo_name(), tag)
+    decision = plan(
+        tag,
+        _subject(tag),
+        exists,
+        count,
+        pypi_succeeded=pypi_succeeded,
+        sbom_acceptable=acceptable,
+    )
     if requested and decision["action"] not in {"recover", "sbom"}:
         raise SystemExit(f"refusing {requested}; it is not an unfinished release")
     if expect == "sbom" and decision["action"] != "sbom":
@@ -466,7 +527,10 @@ def self_test() -> None:
     if workflow_mode("sbom") != "sbom" or workflow_mode("recover") != "wheels":
         raise SystemExit("workflow mode mapping changed")
     if plan("v0.3.1", subject, True, 1, pypi_succeeded=True)["action"] != "continue":
-        raise SystemExit("a release with assets was reused")
+        raise SystemExit("a release with a good SBOM was replaced")
+    replaced = plan("v0.3.1", subject, True, 1, pypi_succeeded=True, sbom_acceptable=False)
+    if replaced != {"action": "sbom", "tag": "v0.3.1"}:
+        raise SystemExit(f"a directory-only SBOM was left in place: {replaced}")
     if plan("v0.3.1", subject, False, 0, pypi_succeeded=True)["action"] != "continue":
         raise SystemExit("a missing GitHub Release was reused")
     if plan("v0.3.1", "🔖 chore(release): v0.3.2", True, 0)["action"] != "continue":
@@ -587,8 +651,16 @@ def self_test() -> None:
         raise SystemExit(f"current SBOM name was not preferred: {preferred}")
     with tempfile.TemporaryDirectory() as raw:
         directory = Path(raw)
-        path = directory / "llm-guardrails-sbom.spdx.json"
-        path.write_text("{}\n", encoding="utf-8")
+        from release_sbom import build_release_sbom
+
+        path = directory / "ferroguard.spdx.json"
+        document = build_release_sbom(
+            "0.3.1",
+            ["pydantic>=2.0,<3.0"],
+            [{"filename": "ferroguard-0.3.1.tar.gz", "sha256": "a" * 64}],
+            "2026-11-05T00:00:00Z",
+        )
+        path.write_text(json.dumps(document), encoding="utf-8")
         seen: list[list[str]] = []
 
         def fake(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -611,7 +683,7 @@ def self_test() -> None:
         try:
             upload_release_asset(
                 "v0.3.1",
-                directory / "ferroguard.spdx.json",
+                directory / "llm-guardrails-sbom.spdx.json",
                 DEFAULT_REPO,
                 run=fake,
             )
@@ -620,8 +692,25 @@ def self_test() -> None:
                 raise
         else:
             raise SystemExit("missing SBOM was uploaded")
+        empty = directory / "ferroguard.spdx.json"
+        empty.write_text(
+            json.dumps(
+                {
+                    "name": "dist",
+                    "packages": [{"name": "dist", "versionInfo": None, "filesAnalyzed": False}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        try:
+            upload_release_asset("v0.3.1", empty, DEFAULT_REPO, run=fake)
+        except SystemExit as exc:
+            if "directory-only" not in str(exc):
+                raise
+        else:
+            raise SystemExit("directory-only SBOM was uploaded")
         if seen != [expected]:
-            raise SystemExit("missing SBOM called gh")
+            raise SystemExit("rejected SBOM called gh")
     source = Path(__file__).read_text(encoding="utf-8")
     if "git " + "push" in source or "git " + "tag" in source:
         raise SystemExit("recovery script contains a tag or push command")

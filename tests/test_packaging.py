@@ -1,12 +1,18 @@
 """The PyPI distribution name and the release publish path."""
 
+import hashlib
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
+import tarfile
+import urllib.request
 from importlib.metadata import version
 from pathlib import Path
+
+import pytest
 
 import llm_guardrails
 
@@ -60,12 +66,16 @@ def test_release_publishes_inside_release_yml():
     assert "contents: write" in sbom
     assert "actions: read" in sbom
     assert "id-token:" not in sbom
-    assert "anchore/sbom-action@" in sbom
-    assert "artifact-name: ferroguard.spdx.json" in sbom
-    assert "output-file: ferroguard.spdx.json" in sbom
-    assert "upload-release-assets: false" in sbom
+    assert "release_sbom.py" in sbom
+    assert "--generate" in sbom
+    assert "--file ferroguard.spdx.json" in sbom
+    assert "--delete-invalid" in sbom
+    assert "54a87372498168b2d033e876fd41fa4e8035b872699e525a57046e1f2f09c860" in sbom
+    assert "path: dist" not in sbom
+    assert "--upload-saved-sbom" not in sbom
+    assert "anchore/sbom-action@" not in sbom
     assert "--repo" in sbom
-    assert "--upload-saved-sbom" in sbom
+    assert "--upload-sbom" in sbom
     assert "needs.selected.outputs.mode == 'sbom'" in sbom
     assert "needs.selected.outputs.tag" in sbom
     assert "needs.pypi.outputs.tag" not in sbom
@@ -357,6 +367,23 @@ def _recover():
     return release_recover
 
 
+def _sbom():
+    _recover()
+    import release_sbom
+
+    return release_sbom
+
+
+def _sbom_text() -> str:
+    document = _sbom().build_release_sbom(
+        "0.3.1",
+        ["pydantic>=2.0,<3.0"],
+        [{"filename": "ferroguard-0.3.1.tar.gz", "sha256": "a" * 64}],
+        "2026-11-05T00:00:00Z",
+    )
+    return json.dumps(document)
+
+
 def test_sbom_plan_skips_wheels_after_pypi_succeeded():
     recover = _recover()
     subject = "🔖 chore(release): v0.3.1"
@@ -400,7 +427,7 @@ def test_sbom_upload_uses_explicit_repo_without_a_checkout(tmp_path, monkeypatch
     work = tmp_path / "no-git"
     work.mkdir()
     sbom = work / "llm-guardrails-sbom.spdx.json"
-    sbom.write_text('{"spdxVersion": "SPDX-2.3"}\n', encoding="utf-8")
+    sbom.write_text(_sbom_text(), encoding="utf-8")
     record = tmp_path / "args"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -449,7 +476,7 @@ def test_sbom_upload_uses_explicit_repo_without_a_checkout(tmp_path, monkeypatch
     assert recorded[1:] == expected[1:]
     assert not (work / ".git").exists()
     current = work / "ferroguard.spdx.json"
-    current.write_text("{}\n", encoding="utf-8")
+    current.write_text(_sbom_text(), encoding="utf-8")
     current_argv = recover.upload_release_asset(
         "v0.3.1",
         current,
@@ -538,7 +565,7 @@ def test_saved_sbom_upload_uses_the_action_artifact(tmp_path, monkeypatch):
             dest = Path(argv[argv.index("--dir") + 1])
             name = argv[argv.index("--name") + 1]
             dest.mkdir(parents=True, exist_ok=True)
-            (dest / name).write_text("{}\n", encoding="utf-8")
+            (dest / name).write_text(_sbom_text(), encoding="utf-8")
             return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[:3] == ["gh", "release", "upload"]:
             return subprocess.CompletedProcess(argv, 0, "", "")
@@ -718,7 +745,7 @@ def test_retries_keep_same_tag_publication_and_sbom(tmp_path):
             dest = Path(argv[argv.index("--dir") + 1])
             name = argv[argv.index("--name") + 1]
             dest.mkdir(parents=True, exist_ok=True)
-            (dest / name).write_text("{}\n", encoding="utf-8")
+            (dest / name).write_text(_sbom_text(), encoding="utf-8")
             return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[:3] == ["gh", "release", "upload"]:
             return subprocess.CompletedProcess(argv, 0, "", "")
@@ -757,3 +784,134 @@ def test_retries_keep_same_tag_publication_and_sbom(tmp_path):
     assert "ferroguard.spdx.json" not in download
     assert path.is_file()
     assert not (tmp_path / ".git").exists()
+
+
+def test_directory_only_sbom_is_replaced_without_a_wheel_rebuild(tmp_path):
+    recover = _recover()
+    sbom = _sbom()
+    subject = "🔖 chore(release): v0.3.1"
+    decision = recover.plan(
+        "v0.3.1",
+        subject,
+        True,
+        1,
+        pypi_succeeded=True,
+        sbom_acceptable=False,
+    )
+    assert decision == {"action": "sbom", "tag": "v0.3.1"}
+    assert recover.workflow_mode(decision["action"]) == "sbom"
+    empty = {
+        "name": "dist",
+        "packages": [{"name": "dist", "versionInfo": None, "filesAnalyzed": False}],
+    }
+    assert sbom.is_directory_only_sbom(empty)
+    try:
+        sbom.assert_release_sbom(empty, "0.3.1")
+    except SystemExit as exc:
+        assert "directory-only" in str(exc)
+    else:
+        raise AssertionError("directory-only SBOM was accepted")
+    good = json.loads(_sbom_text())
+    sbom.assert_release_sbom(good, "0.3.1")
+    assert sbom.bad_asset_names(
+        {"llm-guardrails-sbom.spdx.json": empty, "ferroguard.spdx.json": good},
+        "0.3.1",
+    ) == ["llm-guardrails-sbom.spdx.json"]
+    assert sbom.delete_asset_argv(
+        "v0.3.1",
+        "llm-guardrails-sbom.spdx.json",
+        "melroyanthony/llm-guardrails",
+    ) == [
+        "gh",
+        "release",
+        "delete-asset",
+        "v0.3.1",
+        "llm-guardrails-sbom.spdx.json",
+        "--repo",
+        "melroyanthony/llm-guardrails",
+        "--yes",
+    ]
+    command = " ".join(sbom.syft_argv(Path("unpacked-wheel"), "0.3.1"))
+    assert "python-installed-package-cataloger" in command
+    assert "dir:dist" not in command
+    resolved = json.loads(_sbom_text())
+    resolved["packages"].append(
+        {
+            "name": "pydantic",
+            "SPDXID": "SPDXRef-Resolved",
+            "versionInfo": "2.14.2",
+            "sourceInfo": "resolved from the lockfile",
+        }
+    )
+    try:
+        sbom.assert_release_sbom(resolved, "0.3.1")
+    except SystemExit as exc:
+        assert "resolved" in str(exc)
+    else:
+        raise AssertionError("a resolved dependency was accepted")
+    calls: list[list[str]] = []
+
+    def run(argv):
+        calls.append(argv)
+        raise AssertionError(argv)
+
+    empty_path = tmp_path / "ferroguard.spdx.json"
+    empty_path.write_text(json.dumps(empty), encoding="utf-8")
+    try:
+        recover.upload_release_asset(
+            "v0.3.1",
+            empty_path,
+            "melroyanthony/llm-guardrails",
+            run=run,
+        )
+    except SystemExit as exc:
+        assert "directory-only" in str(exc)
+    else:
+        raise AssertionError("directory-only SBOM was uploaded")
+    assert calls == []
+
+
+_SYFT_SHA256 = "54a87372498168b2d033e876fd41fa4e8035b872699e525a57046e1f2f09c860"
+
+
+def test_published_distributions_catalog_ferroguard_0_3_1(tmp_path):
+    if platform.system() != "Linux" or platform.machine() not in {"x86_64", "amd64"}:
+        pytest.skip("the pinned Syft binary is linux amd64")
+    sbom = _sbom()
+    archive = tmp_path / "syft.tar.gz"
+    urllib.request.urlretrieve(  # noqa: S310
+        "https://github.com/anchore/syft/releases/download/v1.54.0/syft_1.54.0_linux_amd64.tar.gz",
+        archive,
+    )
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert digest == _SYFT_SHA256
+    with tarfile.open(archive) as bundle:
+        member = bundle.getmember("syft")
+        extracted = bundle.extractfile(member)
+        if extracted is None:
+            raise AssertionError("syft archive has no file")
+        binary = tmp_path / "syft"
+        binary.write_bytes(extracted.read())
+    binary.chmod(0o755)
+    document = sbom.generate_release_sbom("0.3.1", tmp_path / "published", syft=str(binary))
+    sbom.assert_release_sbom(document, "0.3.1")
+    assert sbom.is_directory_only_sbom(document) is False
+    names = [package["name"] for package in document["packages"]]
+    assert names[0] == "ferroguard"
+    assert document["packages"][0]["versionInfo"] == "0.3.1"
+    declared = [
+        package["sourceInfo"]
+        for package in document["packages"]
+        if str(package.get("sourceInfo") or "").startswith("declared Requires-Dist:")
+    ]
+    assert any("pydantic>=2.0,<3.0" in item for item in declared)
+    assert any("extra == 'api'" in item and "fastapi" in item for item in declared)
+    assert any("uvicorn[standard]" in item for item in declared)
+    assert all(package.get("versionInfo") == "NOASSERTION" for package in document["packages"][1:])
+    assert "2.14.2" not in json.dumps(document)
+    hashes = {item["fileName"]: item["checksums"][0]["checksumValue"] for item in document["files"]}
+    assert hashes["ferroguard-0.3.1-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"] == (
+        "34d2f7917454b830331927fba40152655fb7b814295f170601f96a7a3eff1464"
+    )
+    assert len(hashes) == 6
+    assert "ferroguard-0.3.1.tar.gz" in hashes
