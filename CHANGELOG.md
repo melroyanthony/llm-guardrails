@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.5](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.5) (2026-11-05)
+
+### Documentation
+
+* docs: align README with crabcake style
+
 ## [0.3.4](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.4) (2026-11-05)
 
 ### Bug Fixes
