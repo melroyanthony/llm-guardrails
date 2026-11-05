@@ -26,9 +26,11 @@ class MappingStore:
     """Keep placeholder maps in memory until ``ttl_seconds`` elapses.
 
     The store is process-local. Ids are not shared across workers or replicas,
-    and they disappear when the process restarts. ``max_entries`` caps how
-    many maps are kept. ``max_bytes`` caps their combined UTF-8 size.
-    ``max_entry_bytes`` caps one map. A map that does not fit is not stored.
+    and they disappear when the process restarts.
+
+    Defaults are ``1024`` maps (``DEFAULT_MAX_ENTRIES``), ``262144`` UTF-8
+    bytes in total (``DEFAULT_MAX_BYTES``), and ``65536`` bytes for one map
+    (``DEFAULT_MAX_ENTRY_BYTES``). A map that does not fit is not stored.
     """
 
     def __init__(

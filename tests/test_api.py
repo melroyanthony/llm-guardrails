@@ -260,6 +260,128 @@ def test_full_does_not_store_a_mapping(client: TestClient):
     assert "alice@example.com" in response.json()["output_guard"]["final_text"]
 
 
+def test_many_empty_chunks_stay_bounded_and_are_accepted():
+    import asyncio
+
+    from api.body_limit import _buffer_body
+
+    empty_chunks = 20_000
+    sent = 0
+
+    async def receive():
+        nonlocal sent
+        sent += 1
+        if sent <= empty_chunks:
+            return {"type": "http.request", "body": b"", "more_body": True}
+        return {"type": "http.request", "body": b'{"text":"hello"}', "more_body": False}
+
+    async def run():
+        buffered, too_large = await _buffer_body(receive, MAX_BODY_BYTES)
+        assert too_large is False
+        assert len(buffered) == 1
+        assert buffered[0]["body"] == b'{"text":"hello"}'
+        assert buffered[0]["more_body"] is False
+
+    asyncio.run(run())
+
+    parts_sent = 0
+
+    async def app_receive():
+        nonlocal parts_sent
+        parts_sent += 1
+        if parts_sent <= empty_chunks:
+            return {"type": "http.request", "body": b"", "more_body": True}
+        if parts_sent == empty_chunks + 1:
+            return {"type": "http.request", "body": b'{"text":"hello"}', "more_body": False}
+        return {"type": "http.disconnect"}
+
+    async def through_app():
+        messages: list[dict] = []
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/guard/input",
+            "raw_path": b"/guard/input",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+            "client": ("127.0.0.1", 50000),
+            "server": ("testserver", 80),
+        }
+
+        async def send(message):
+            messages.append(message)
+
+        await main.app(scope, app_receive, send)
+        start = next(message for message in messages if message["type"] == "http.response.start")
+        assert start["status"] == 200
+
+    main.reset_for_tests()
+    asyncio.run(through_app())
+
+
+def test_full_mapping_store_is_a_capacity_error(client: TestClient):
+    from api.pii_store import MappingStore
+
+    store = MappingStore(max_entries=1, max_bytes=10_000, max_entry_bytes=1_000)
+    main._store = store
+    try:
+        first = client.post("/guard/input", json={"text": "Email alice@example.com please."})
+        assert first.status_code == 200
+        created = first.json()
+        mapping_id = created["pii_mapping_id"]
+        assert isinstance(mapping_id, str)
+        second = client.post("/guard/input", json={"text": "Email carol@example.com please."})
+        assert second.status_code == 503
+        detail = second.json()["detail"]
+        assert "cannot keep this map" in detail
+        assert "1 maps" in detail
+        assert "sanitised_text" not in second.json()
+        restored = client.post(
+            "/guard/output",
+            json={"text": f"Reply to {created['sanitised_text']}", "pii_mapping_id": mapping_id},
+        )
+        assert restored.status_code == 200
+        assert "alice@example.com" in restored.json()["final_text"]
+    finally:
+        main._store = MappingStore(
+            max_entries=main.MAX_MAPPING_ENTRIES,
+            max_bytes=main.MAX_MAPPING_BYTES,
+            max_entry_bytes=main.MAX_MAPPING_ENTRY_BYTES,
+        )
+
+
+def test_oversized_mapping_is_a_capacity_error(client: TestClient):
+    from api.pii_store import MappingStore
+
+    store = MappingStore(max_entries=4, max_bytes=10_000, max_entry_bytes=8)
+    main._store = store
+    try:
+        response = client.post("/guard/input", json={"text": "Email alice@example.com please."})
+        assert response.status_code == 503
+        detail = response.json()["detail"]
+        assert "cannot keep this map" in detail
+        assert "8 bytes for one map" in detail
+        assert response.json().get("pii_mapping_id") is None
+        assert len(store) == 0
+    finally:
+        main._store = MappingStore(
+            max_entries=main.MAX_MAPPING_ENTRIES,
+            max_bytes=main.MAX_MAPPING_BYTES,
+            max_entry_bytes=main.MAX_MAPPING_ENTRY_BYTES,
+        )
+
+
+def test_openapi_documents_mapping_store_limits(client: TestClient):
+    description = client.get("/openapi.json").json()["paths"]["/guard/input"]["post"]["description"]
+    assert "1024 maps" in description
+    assert "262144" in description
+    assert "65536" in description
+    assert "503" in description
+
+
 def test_chunked_limit_does_not_use_starlette_private_body():
     root = Path(__file__).resolve().parents[1]
     for name in ("main.py", "body_limit.py"):

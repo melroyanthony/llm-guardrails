@@ -1,6 +1,8 @@
 """Reject oversized HTTP bodies before the application reads them.
 
 This is plain ASGI. It does not write Starlette's private request body.
+Replay state is the body bytes, capped at ``max_bytes``. Empty chunks are
+not stored, so they cannot grow memory on their own.
 """
 
 from __future__ import annotations
@@ -49,20 +51,25 @@ def _content_length(scope: Scope) -> int | None:
 
 
 async def _buffer_body(receive: Receive, max_bytes: int) -> tuple[list[Message], bool]:
+    """Collect body bytes. The returned list has at most two messages."""
     received = 0
-    buffered: list[Message] = []
+    payload = bytearray()
     while True:
         message = await receive()
         if message["type"] != "http.request":
-            buffered.append(message)
-            return buffered, False
-        body = message.get("body") or b""
-        received += len(body)
+            return [_request_message(payload), message], False
+        piece = message.get("body") or b""
+        received += len(piece)
         if received > max_bytes:
-            return buffered, True
-        buffered.append(message)
+            return [], True
+        if piece:
+            payload.extend(piece)
         if not message.get("more_body", False):
-            return buffered, False
+            return [_request_message(payload)], False
+
+
+def _request_message(payload: bytearray) -> Message:
+    return {"type": "http.request", "body": bytes(payload), "more_body": False}
 
 
 def _replay(buffered: list[Message], receive: Receive) -> Receive:

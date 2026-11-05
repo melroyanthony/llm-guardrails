@@ -11,11 +11,11 @@ POST /guard/output  -- Run output guardrails (validation + bias scoring + PII re
 POST /guard/full    -- Full pipeline: input guards -> simulated LLM -> output guards
 GET  /health        -- Health check
 
-``/guard/input`` returns an opaque ``pii_mapping_id``. A non-empty map that
-fits the entry and byte budgets stays in this process for
-``MAPPING_TTL_SECONDS`` and is popped on the first ``/guard/output`` call.
-A map that does not fit is not stored, and it does not remove another
-caller's id. The id is not shared across workers.
+``/guard/input`` returns an opaque ``pii_mapping_id`` when the map fits:
+at most 1024 maps, 262144 UTF-8 bytes in total, and 65536 bytes for one
+map. Otherwise the response is HTTP 503 and this call stores nothing.
+A stored id stays in this process for ``MAPPING_TTL_SECONDS`` and is
+popped on the first ``/guard/output`` call. It is not shared across workers.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from api.pii_store import (
     DEFAULT_MAX_ENTRIES,
     DEFAULT_MAX_ENTRY_BYTES,
     MappingStore,
+    mapping_nbytes,
 )
 from llm_guardrails.pipeline import GuardrailsPipeline
 
@@ -152,9 +153,30 @@ class HealthResponse(BaseModel):
     version: str
 
 
+def _capacity_detail() -> str:
+    return (
+        "PII mapping store cannot keep this map "
+        f"({_store.max_entries} maps, {_store.max_bytes} bytes total, "
+        f"{_store.max_entry_bytes} bytes for one map)."
+    )
+
+
+def _remember_mapping(mapping: dict[str, str]) -> str | None:
+    """Store a map. An empty map returns None. A map that does not fit is 503."""
+    if not mapping:
+        return None
+    size = mapping_nbytes(mapping)
+    if size > _store.max_entry_bytes or size > _store.max_bytes:
+        raise HTTPException(status_code=503, detail=_capacity_detail())
+    stored = _store.put(mapping, MAPPING_TTL_SECONDS)
+    if stored is None:
+        raise HTTPException(status_code=503, detail=_capacity_detail())
+    return stored
+
+
 def _input_response(text: str, *, remember: bool) -> tuple[InputResponse, dict[str, str], bool]:
     pre = get_pipeline().pre_process(text)
-    mapping_id = _store.put(pre.pii_mapping, MAPPING_TTL_SECONDS) if remember else None
+    mapping_id = _remember_mapping(pre.pii_mapping) if remember else None
     response = InputResponse(
         sanitised_text=pre.sanitised_text,
         pii_mapping_id=mapping_id,
@@ -196,7 +218,17 @@ async def health():
     return HealthResponse(status="ok", version=package_version())
 
 
-@app.post("/guard/input", response_model=InputResponse, tags=["guardrails"])
+@app.post(
+    "/guard/input",
+    response_model=InputResponse,
+    tags=["guardrails"],
+    description=(
+        "Run input-side guardrails. A non-empty placeholder map is stored only "
+        f"when it fits: {MAX_MAPPING_ENTRIES} maps, {MAX_MAPPING_BYTES} UTF-8 bytes "
+        f"in total, and {MAX_MAPPING_ENTRY_BYTES} bytes for one map. "
+        "If it does not fit, the response is 503 and this call stores nothing."
+    ),
+)
 async def guard_input(req: InputRequest):
     """Run input-side guardrails on user text."""
     response, _mapping, _blocked = _input_response(req.text, remember=True)
