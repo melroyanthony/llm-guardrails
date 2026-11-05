@@ -12,8 +12,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Install maturin
-RUN uv pip install --system --no-cache maturin
+# Install maturin. The pin matches the release workflow.
+RUN uv pip install --system --no-cache "maturin==1.16.0"
 
 # Copy Rust + Python source
 COPY Cargo.toml Cargo.lock ./

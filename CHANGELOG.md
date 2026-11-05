@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Breaking changes
+
+* The PyPI distribution name is `ferroguard`. Install with `pip install ferroguard` and keep `import llm_guardrails`. `importlib.metadata.version("llm_guardrails")` no longer finds the package; use `ferroguard`. `GET /health` reports that distribution version.
+
+### Features
+
+* A release builds one abi3-py311 wheel each for Linux (`manylinux_2_17`, the manylinux2014 image, on x86_64 and aarch64), macOS (x86_64 and arm64), and Windows x86_64, plus an sdist, and publishes them from `release.yml` with PyPI trusted publishing. The GitHub Release gets an SPDX SBOM of those artifacts. CI builds the same Linux x86_64 wheel and imports it on Python 3.11 and 3.14.
+
 ## [0.3.0](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.0) (2026-11-04)
 
 ### Breaking changes

@@ -39,7 +39,7 @@ _store = MappingStore(max_entries=MAX_MAPPING_ENTRIES)
 def package_version() -> str:
     """Installed distribution version. Maturin reads it from Cargo.toml."""
     try:
-        return version("llm_guardrails")
+        return version("ferroguard")
     except PackageNotFoundError:
         return "0.0.0"
 

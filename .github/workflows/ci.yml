@@ -110,3 +110,55 @@ jobs:
 
       - name: Test
         run: cargo test
+
+  wheel:
+    name: Wheel smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and Python 3.11
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.11"
+
+      # Same action, target, manylinux setting, and args as the release
+      # linux-x86_64 matrix row. `manylinux: auto` builds in the
+      # manylinux2014 image, so the wheel tag is manylinux_2_17.
+      - name: Build the abi3 wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.16.0
+          target: x86_64
+          manylinux: auto
+          args: --release --out dist --interpreter python3.11
+
+      - name: Install Python 3.14 and import the wheel
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/ferroguard-*-cp311-abi3-*manylinux_2_17_x86_64*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "expected one manylinux_2_17 x86_64 abi3 wheel" >&2
+            ls -la dist >&2 || true
+            exit 1
+          fi
+          case "${wheels[0]}" in
+            *manylinux2014_x86_64*) ;;
+            *)
+              echo "missing manylinux2014_x86_64 alias: ${wheels[0]}" >&2
+              exit 1
+              ;;
+          esac
+          uv python install 3.14
+          for py in 3.11 3.14; do
+            uv venv --python "$py" "/tmp/smoke-$py"
+            uv pip install --python "/tmp/smoke-$py/bin/python" "${wheels[0]}"
+            # -P keeps the checkout off sys.path, so this imports the wheel.
+            "/tmp/smoke-$py/bin/python" -P -c "import llm_guardrails; from importlib.metadata import version; from llm_guardrails._core import pii_redact; text, mapping = pii_redact('Mail a@b.co'); assert 'site-packages' in llm_guardrails.__file__; assert 'a@b.co' not in text and mapping; assert version('ferroguard'); print(version('ferroguard'), llm_guardrails.__file__, text)"
+          done

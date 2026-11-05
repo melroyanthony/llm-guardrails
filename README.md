@@ -22,6 +22,19 @@ demonstrates the pipeline. It does not call a model.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - Python 3.11, 3.12, 3.13, or 3.14. `uv sync` reads `.python-version` and uses 3.14
 
+### Install
+
+```bash
+pip install ferroguard
+```
+
+```python
+import llm_guardrails
+```
+
+The project on PyPI is `ferroguard`. The import name stays `llm_guardrails`.
+Wheels are abi3 for Python 3.11 and newer, so one wheel covers 3.11 through 3.14.
+
 ### Run It
 
 ```bash
@@ -36,7 +49,7 @@ uv run uvicorn api.main:app --reload
 | 📄 OpenAPI document | http://localhost:8000/openapi.json |
 
 `GET /health` returns `{"status":"ok","version":"<installed>"}`. That version is the
-installed `llm_guardrails` distribution, read from package metadata. Maturin takes
+installed `ferroguard` distribution, read from package metadata. Maturin takes
 it from `Cargo.toml`. It is not hard-coded in `api/main.py`.
 
 Guard text from Python:
@@ -160,14 +173,15 @@ curl -s http://localhost:8000/health
 ```
 
 The image does not load `.env-template`. Local development uses uv and Python 3.14.
-Publishing a wheel to PyPI is not wired up.
+PyPI publishing runs inside the release workflow. It is not a separate tag workflow.
 
 GitHub Actions, on pull requests and on pushes to `main`:
 
-- `CI` runs ruff, mypy on `llm_guardrails/`, pytest on Python 3.11 and 3.14, and `cargo fmt`, clippy, and `cargo test`
+- `CI` runs ruff, mypy on `llm_guardrails/`, pytest on Python 3.11 and 3.14, a wheel build that imports on 3.11 and 3.14, and `cargo fmt`, clippy, and `cargo test`
 - `Security` runs cargo-deny and pip-audit
 - `CodeQL` analyses Python and Rust with `build-mode: none`
-- `Release` runs on a push to `main`. It commits `.version` and `CHANGELOG.md`, pushes that commit to `main` without `--force`, then pushes the tag. It does not publish a wheel. See [RELEASING.md](RELEASING.md)
+- `Release` runs on a push to `main`. It commits `.version` and `CHANGELOG.md`, pushes that commit to `main` without `--force`, then pushes the tag. The same run builds the abi3 wheels and sdist and publishes them to PyPI. See [RELEASING.md](RELEASING.md)
+- `Scorecard` runs the OpenSSF Scorecard on `main` and on a weekly schedule
 
 ## 🔒 Security
 

@@ -2,7 +2,9 @@
 
 A push to `main` publishes in one GitHub Actions run. The workflow is
 [`.github/workflows/release.yml`](.github/workflows/release.yml). It does not
-open a pull request, and it does not publish a wheel.
+open a pull request. The same run builds the wheels and publishes them to PyPI.
+A workflow that started on the tag push would not run: the version commit is
+pushed with `GITHUB_TOKEN`.
 
 ## When the job runs
 
@@ -62,7 +64,48 @@ times. It then creates the `vX.Y.Z` tag on that commit, pushes the tag, and
 opens a GitHub Release whose notes point at `CHANGELOG.md`.
 
 A re-run against a version that is already the tip of `main`, or already
-tagged, does not create a second commit, tag, or GitHub Release.
+tagged, does not create a second commit, tag, or GitHub Release. Wheel jobs
+still build when the decision stays `publish`, and the PyPI upload skips
+files that are already there.
+
+## Wheels and PyPI
+
+After the tag exists, this same workflow checks out that tag and builds one
+abi3-py311 wheel for each of:
+
+- Linux x86_64 (`ubuntu-latest`) and aarch64 (`ubuntu-24.04-arm`), both with
+  `manylinux: auto`. That builds in the manylinux2014 image. The wheel
+  filename carries `manylinux_2_17_<arch>` and the `manylinux2014_<arch>` alias.
+- macOS arm64 (`macos-latest`)
+- macOS x86_64 (`macos-15-intel`)
+- Windows x86_64 (`windows-latest`)
+
+It also builds an sdist. The `pypi` job only downloads those artifacts and
+uploads them with PyPI trusted publishing. Its permissions are `id-token: write`
+and `actions: read` (so it can download this run's artifacts). PEP 740
+attestations are signed with that OIDC token. The job does not have
+`attestations: write` or `contents: write`. There is no PyPI API token.
+
+A later job, which `needs: pypi` and has `contents: write`, writes an SPDX
+SBOM of the same artifacts and attaches `ferroguard.spdx.json` to the GitHub
+Release.
+
+The publish job uses the GitHub environment `pypi`. Before the first release,
+register a trusted publisher on PyPI:
+
+| Setting | Value |
+| --- | --- |
+| PyPI project name | `ferroguard` |
+| Owner | `melroyanthony` |
+| Repository name | `llm-guardrails` |
+| Workflow filename | `release.yml` |
+| Environment name | `pypi` |
+
+Create the GitHub environment `pypi` on this repository with no secret and no
+required reviewer, unless a reviewer should approve each publish. Limit that
+environment's deployment branches to `main`, so a workflow on another branch
+cannot use the trusted publisher. Use a pending publisher if the PyPI project
+does not exist yet.
 
 ## Local checks
 
