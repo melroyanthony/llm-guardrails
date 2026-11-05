@@ -2,6 +2,8 @@
 
 ## Reporting a vulnerability
 
+Vulnerability disclosure for this repository is private.
+
 Do not report security vulnerabilities through public GitHub issues, discussions, or pull requests.
 
 Report them privately by opening a [GitHub security advisory](https://github.com/melroyanthony/llm-guardrails/security/advisories/new).
