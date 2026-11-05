@@ -6,7 +6,7 @@
 
 * Release wheel jobs no longer fail after the wheel is uploaded. Those jobs do not install Python packages with uv, so setup-uv no longer tries to save a dependency cache they never create.
 * An unfinished GitHub Release is published again from its existing tag. The workflow does not create a replacement tag. `v0.3.1` stays `v0.3.1`.
-* When that release is already on PyPI, the workflow attaches the saved SPDX SBOM and does not rebuild the wheels, publish them again, or create another tag. `gh` is given the repository explicitly, and the uploaded file is the SBOM artifact the action wrote.
+* When that release is already on PyPI, the workflow attaches the saved SPDX SBOM for that same tag and does not rebuild the wheels, publish them again, or create another tag. `gh` is given the repository explicitly. A later SBOM retry that skips PyPI does not start a wheel rebuild, and an older release's SBOM is not attached to the newer tag.
 
 ## [0.3.1](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.1) (2026-11-05)
 

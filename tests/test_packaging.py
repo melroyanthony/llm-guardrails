@@ -76,8 +76,12 @@ def test_release_publishes_inside_release_yml():
     assert "enable-cache: false" in wheels_job
     assert "needs.selected.outputs.mode == 'wheels'" in wheels_job
     assert "needs.selected.outputs.mode == 'wheels'" in pypi
+    release_job = jobs.split("\n  release:", 1)[1].split("\n  recover:", 1)[0]
+    assert "actions: read" in release_job
+    assert "id-token:" not in release_job
     recover_job = jobs.split("\n  recover:", 1)[1].split("\n  selected:", 1)[0]
     assert "contents: read" in recover_job
+    assert "actions: read" in recover_job
     assert "contents: write" not in recover_job
     assert "id-token:" not in recover_job
     assert "workflow_dispatch:" in header
@@ -368,19 +372,22 @@ def test_sbom_plan_skips_wheels_after_pypi_succeeded():
             {
                 "databaseId": 1,
                 "status": "in_progress",
+                "tag": "v0.3.1",
                 "jobs": [],
                 "artifact_names": ["ferroguard.spdx.json"],
             },
             {
                 "databaseId": 42093909645,
                 "status": "completed",
+                "tag": "v0.3.1",
                 "jobs": [
                     {"name": "Publish to PyPI", "conclusion": "success"},
                     {"name": "Release SBOM", "conclusion": "failure"},
                 ],
                 "artifact_names": ["llm-guardrails-sbom.spdx.json"],
             },
-        ]
+        ],
+        "v0.3.1",
     )
     assert saved == {
         "run_id": "42093909645",
@@ -479,6 +486,13 @@ def _completed(argv: list[str], payload) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
 
 
+_V031_TAGS = [{"name": "v0.3.1", "sha": "59888df", "parent": "a07f80a"}]
+
+
+def _v031_ancestor(ancestor: str, head: str) -> bool:
+    return ancestor == "59888df" and head == "27746ed"
+
+
 def test_saved_sbom_upload_uses_the_action_artifact(tmp_path, monkeypatch):
     recover = _recover()
     work = tmp_path / "no-git"
@@ -491,7 +505,14 @@ def test_saved_sbom_upload_uses_the_action_artifact(tmp_path, monkeypatch):
         if argv[:3] == ["gh", "run", "list"]:
             return _completed(
                 argv,
-                [{"databaseId": 42093909645, "status": "completed", "conclusion": "failure"}],
+                [
+                    {
+                        "databaseId": 42093909645,
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "headSha": "27746ed",
+                    }
+                ],
             )
         if argv[:3] == ["gh", "run", "view"]:
             return _completed(
@@ -529,6 +550,8 @@ def test_saved_sbom_upload_uses_the_action_artifact(tmp_path, monkeypatch):
         "melroyanthony/llm-guardrails",
         dest,
         run=run,
+        tags=_V031_TAGS,
+        is_ancestor=_v031_ancestor,
     )
     path = dest / "llm-guardrails-sbom.spdx.json"
     assert argv == [
@@ -564,7 +587,16 @@ def test_saved_sbom_missing_after_download_is_not_uploaded(tmp_path):
     def run(argv):
         calls.append(argv[:3])
         if argv[:3] == ["gh", "run", "list"]:
-            return _completed(argv, [{"databaseId": 42093909645, "status": "completed"}])
+            return _completed(
+                argv,
+                [
+                    {
+                        "databaseId": 42093909645,
+                        "status": "completed",
+                        "headSha": "27746ed",
+                    }
+                ],
+            )
         if argv[:3] == ["gh", "run", "view"]:
             return _completed(
                 argv,
@@ -590,9 +622,138 @@ def test_saved_sbom_missing_after_download_is_not_uploaded(tmp_path):
             "melroyanthony/llm-guardrails",
             tmp_path / "sbom-in",
             run=run,
+            tags=_V031_TAGS,
+            is_ancestor=_v031_ancestor,
         )
     except SystemExit as exc:
         assert "not found" in str(exc)
     else:
         raise AssertionError("missing SBOM was uploaded")
     assert ["gh", "release", "upload"] not in calls
+
+
+def test_retries_keep_same_tag_publication_and_sbom(tmp_path):
+    """A later skipped PyPI job must not rebuild, and v0.3.0's SBOM stays put."""
+    recover = _recover()
+    tags = [
+        {"name": "v0.3.2", "sha": "t32", "parent": "p32"},
+        {"name": "v0.3.1", "sha": "t31", "parent": "p31"},
+        {"name": "v0.3.0", "sha": "t30", "parent": "p30"},
+    ]
+    ancestors = {
+        ("t30", "p31"),
+        ("t31", "retry-2"),
+        ("t30", "retry-2"),
+        ("t31", "retry-1"),
+        ("t30", "retry-1"),
+        ("t31", "published"),
+        ("t30", "published"),
+        ("t31", "p32"),
+        ("t30", "p32"),
+        ("t32", "later"),
+        ("t31", "later"),
+        ("t30", "later"),
+        ("t30", "old"),
+    }
+
+    def is_ancestor(ancestor: str, head: str) -> bool:
+        return (ancestor, head) in ancestors
+
+    assert recover.assign_tag("p31", tags, is_ancestor) == "v0.3.1"
+    assert recover.assign_tag("published", tags, is_ancestor) == "v0.3.1"
+    assert recover.assign_tag("retry-2", tags, is_ancestor) == "v0.3.1"
+    assert recover.assign_tag("p32", tags, is_ancestor) == "v0.3.2"
+    assert recover.assign_tag("later", tags, is_ancestor) == "v0.3.2"
+    assert recover.assign_tag("old", tags, is_ancestor) == "v0.3.0"
+
+    jobs = {
+        "3": [
+            {"name": "Publish to PyPI", "conclusion": "skipped"},
+            {"name": "Release SBOM", "conclusion": "failure"},
+        ],
+        "2": [
+            {"name": "Publish to PyPI", "conclusion": "skipped"},
+            {"name": "Release SBOM", "conclusion": "failure"},
+        ],
+        "10": [
+            {"name": "Publish to PyPI", "conclusion": "success"},
+            {"name": "Release SBOM", "conclusion": "failure"},
+        ],
+        "42093909645": [
+            {"name": "Publish to PyPI", "conclusion": "success"},
+            {"name": "Release SBOM", "conclusion": "failure"},
+        ],
+    }
+    artifacts = {
+        "3": [],
+        "2": [],
+        "10": [{"name": "ferroguard.spdx.json", "expired": False}],
+        "42093909645": [{"name": "llm-guardrails-sbom.spdx.json", "expired": False}],
+    }
+    listed = [
+        {"databaseId": 3, "status": "completed", "headSha": "retry-2", "conclusion": "failure"},
+        {"databaseId": 2, "status": "completed", "headSha": "retry-1", "conclusion": "failure"},
+        {"databaseId": 10, "status": "completed", "headSha": "old", "conclusion": "failure"},
+        {
+            "databaseId": 42093909645,
+            "status": "completed",
+            "headSha": "published",
+            "conclusion": "failure",
+        },
+    ]
+    calls: list[list[str]] = []
+
+    def run(argv):
+        calls.append(list(argv))
+        if argv[:3] == ["gh", "run", "list"]:
+            assert "headSha" in argv[argv.index("--json") + 1]
+            assert "100" in argv
+            return _completed(argv, listed)
+        if argv[:3] == ["gh", "run", "view"]:
+            return _completed(argv, {"jobs": jobs[argv[3]]})
+        if argv[:2] == ["gh", "api"]:
+            run_id = argv[2].rstrip("/").split("/")[-2]
+            return _completed(argv, {"artifacts": artifacts[run_id]})
+        if argv[:3] == ["gh", "run", "download"]:
+            dest = Path(argv[argv.index("--dir") + 1])
+            name = argv[argv.index("--name") + 1]
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / name).write_text("{}\n", encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:3] == ["gh", "release", "upload"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        raise AssertionError(argv)
+
+    assert recover.publish_succeeded(
+        "melroyanthony/llm-guardrails",
+        "v0.3.1",
+        run=run,
+        tags=tags,
+        is_ancestor=is_ancestor,
+    )
+    calls.clear()
+    dest = tmp_path / "sbom-in"
+    argv = recover.upload_saved_sbom(
+        "v0.3.1",
+        "melroyanthony/llm-guardrails",
+        dest,
+        run=run,
+        tags=tags,
+        is_ancestor=is_ancestor,
+    )
+    path = dest / "llm-guardrails-sbom.spdx.json"
+    assert argv == [
+        "gh",
+        "release",
+        "upload",
+        "v0.3.1",
+        str(path),
+        "--repo",
+        "melroyanthony/llm-guardrails",
+        "--clobber",
+    ]
+    download = next(call for call in calls if call[:3] == ["gh", "run", "download"])
+    assert download[3] == "42093909645"
+    assert "ferroguard.spdx.json" not in download
+    assert path.is_file()
+    assert not (tmp_path / ".git").exists()

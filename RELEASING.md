@@ -14,8 +14,10 @@ The workflow triggers on a push to `main`. The job skips when the actor is
 so it does not start another release.
 
 The workflow file sets `permissions: {}`. The release job sets
-`contents: write`. It pushes to `main` with the workflow `GITHUB_TOKEN` and
-does not change branch protection.
+`contents: write` and `actions: read`. It pushes to `main` with the workflow
+`GITHUB_TOKEN` and does not change branch protection. `actions: read` lets
+that job, and the dispatch `recover` job, list Release runs for the selected
+tag. The `recover` job stays `contents: read`, so it cannot push.
 
 ## Decide
 
@@ -127,7 +129,11 @@ Do not re-run that workflow. It is pinned to the file from before this
 change. Do not delete or move the tag. Do not dispatch a run from this
 branch. After this change is on `main`, the next push calls
 `release_recover.py --resolve`. That sees the tag, the empty asset list, and
-the successful Publish to PyPI job, and it returns action `sbom`. The release
+a successful Publish to PyPI job for `v0.3.1`. A later Release run that
+skipped PyPI, which is what an SBOM-only retry does, does not erase that
+success and does not start a wheel rebuild. The artifact has to come from a
+run for `v0.3.1`. An older release's SBOM stays on its own tag. The resolver
+returns action `sbom`. The release
 job then exits without `release_publish.py`, so it does not create a commit
 or a tag. `selected` outputs `mode=sbom` and `tag=v0.3.1`. The wheel, sdist,
 and PyPI jobs stay skipped. The SBOM job checks out the script only, finds

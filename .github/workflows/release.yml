@@ -37,6 +37,8 @@ jobs:
       mode: ${{ steps.publish.outputs.mode }}
     permissions:
       contents: write
+      # Lists Release runs to see whether this tag already reached PyPI.
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,8 +91,9 @@ jobs:
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "mode=wheels" >> "$GITHUB_OUTPUT"
 
-  # Manual retry for an unfinished tag. contents: read only, so this job
-  # cannot create or move a tag. Dispatch it from main; do not invent a tag.
+  # Manual retry for an unfinished tag. contents: read, so this job cannot
+  # create or move a tag. actions: read lists Release runs for that tag.
+  # Dispatch it from main; do not invent a tag.
   recover:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -101,6 +104,8 @@ jobs:
       mode: ${{ steps.check.outputs.mode }}
     permissions:
       contents: read
+      # Lists Release runs to see whether this tag already reached PyPI.
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -372,13 +377,14 @@ jobs:
       contents: write
       actions: read
     steps:
-      # Checkout only supplies the upload script. The upload passes --repo
-      # from github.repository and is tested with no checkout present.
+      # Full history binds each Release run to the tag it published.
+      # The upload passes --repo from github.repository and is tested
+      # with no checkout present.
       - name: Checkout the upload script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Download wheels
         if: needs.selected.outputs.mode != 'sbom'

@@ -83,14 +83,54 @@ def job_conclusion(jobs: list[dict], name: str) -> str:
     return ""
 
 
-def select_saved_sbom(runs: list[dict]) -> dict[str, str]:
-    """Pick the newest completed run whose PyPI job succeeded and SBOM did not.
+def assign_tag(head_sha: str, tags: list[dict], is_ancestor) -> str:
+    """Return the release tag a workflow run published.
+
+    ``tags`` is newest version first. Each item has ``name``, ``sha``, and
+    ``parent`` (the commit the tag points at, and that commit's parent).
+    A run whose head is the parent of a tag created that tag. Otherwise the
+    run belongs to the newest tag that is an ancestor of its head. A newer
+    tag therefore keeps an older release's runs off this tag.
+    """
+    if not head_sha:
+        return ""
+    for tag in tags:
+        if tag.get("parent") and tag["parent"] == head_sha:
+            return str(tag["name"])
+    for tag in tags:
+        sha = str(tag.get("sha") or "")
+        if sha and is_ancestor(sha, head_sha):
+            return str(tag["name"])
+    return ""
+
+
+def pypi_succeeded_for_tag(runs: list[dict], tag: str) -> bool:
+    """True when any completed run for ``tag`` published to PyPI.
+
+    A later SBOM-only retry skips PyPI. That skip does not erase an earlier
+    success for the same tag, and a success for another tag does not count.
+    """
+    if not TAG_RE.fullmatch(tag):
+        raise SystemExit(f"refusing {tag}; expected vX.Y.Z")
+    for run in runs:
+        if run.get("status") != "completed" or run.get("tag") != tag:
+            continue
+        if job_conclusion(list(run.get("jobs") or []), "Publish to PyPI") == "success":
+            return True
+    return False
+
+
+def select_saved_sbom(runs: list[dict], tag: str) -> dict[str, str]:
+    """Pick the newest saved SBOM for ``tag``.
 
     ``runs`` is newest first. Each item has ``databaseId``, ``status``,
-    ``jobs``, and ``artifact_names``.
+    ``tag``, ``jobs``, and ``artifact_names``. Runs for other tags are
+    ignored, including when their artifact is newer than this tag's file.
     """
+    if not TAG_RE.fullmatch(tag):
+        raise SystemExit(f"refusing {tag}; expected vX.Y.Z")
     for run in runs:
-        if run.get("status") != "completed":
+        if run.get("status") != "completed" or run.get("tag") != tag:
             continue
         jobs = list(run.get("jobs") or [])
         if job_conclusion(jobs, "Publish to PyPI") != "success":
@@ -101,7 +141,7 @@ def select_saved_sbom(runs: list[dict]) -> dict[str, str]:
         if not name:
             continue
         return {"run_id": str(run["databaseId"]), "name": name}
-    raise SystemExit("no saved SBOM artifact")
+    raise SystemExit(f"no saved SBOM artifact for {tag}")
 
 
 def repo_name(explicit: str = "") -> str:
@@ -155,10 +195,18 @@ def _json(run, argv: list[str]):
     return json.loads(result.stdout)
 
 
-def locate_sbom(repo: str, run=None) -> dict[str, str]:
-    """Find the saved SBOM artifact. Read-only; does not upload or publish."""
-    repo = repo_name(repo)
-    runner = run or _run
+def discover_release_runs(
+    repo: str,
+    runner,
+    tags: list[dict],
+    is_ancestor,
+    *,
+    with_artifacts: bool,
+) -> list[dict]:
+    """Load completed Release runs, newest first, each bound to one tag.
+
+    A lookup failure aborts. It does not fall through to a new tag.
+    """
     listed = _json(
         runner,
         [
@@ -170,38 +218,63 @@ def locate_sbom(repo: str, run=None) -> dict[str, str]:
             "--workflow",
             "release.yml",
             "--limit",
-            "15",
+            "100",
             "--json",
-            "databaseId,status,conclusion",
+            "databaseId,status,conclusion,headSha",
         ],
     )
     discovered: list[dict] = []
     for item in listed:
         if item.get("status") != "completed":
             continue
+        head = str(item.get("headSha") or "")
         run_id = str(item["databaseId"])
         viewed = _json(
             runner,
             ["gh", "run", "view", run_id, "--repo", repo, "--json", "jobs"],
         )
-        artifacts = _json(
-            runner,
-            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/artifacts"],
-        )
-        names = [
-            artifact["name"]
-            for artifact in artifacts.get("artifacts") or []
-            if not artifact.get("expired")
-        ]
+        names: list[str] = []
+        if with_artifacts:
+            artifacts = _json(
+                runner,
+                ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/artifacts"],
+            )
+            names = [
+                artifact["name"]
+                for artifact in artifacts.get("artifacts") or []
+                if not artifact.get("expired")
+            ]
         discovered.append(
             {
                 "databaseId": item["databaseId"],
                 "status": item["status"],
+                "headSha": head,
+                "tag": assign_tag(head, tags, is_ancestor),
                 "jobs": viewed.get("jobs") or [],
                 "artifact_names": names,
             }
         )
-    return select_saved_sbom(discovered)
+    return discovered
+
+
+def locate_sbom(repo: str, tag: str, run=None, tags=None, is_ancestor=None) -> dict[str, str]:
+    """Find the saved SBOM for ``tag``. Read-only; does not upload or publish."""
+    if not TAG_RE.fullmatch(tag):
+        raise SystemExit(f"refusing {tag}; expected vX.Y.Z")
+    repo = repo_name(repo)
+    runner = run or _run
+    if tags is None:
+        _fetch()
+        tags = version_tags()
+    ancestor = _is_ancestor if is_ancestor is None else is_ancestor
+    discovered = discover_release_runs(
+        repo,
+        runner,
+        tags,
+        ancestor,
+        with_artifacts=True,
+    )
+    return select_saved_sbom(discovered, tag)
 
 
 def download_sbom(repo: str, found: dict[str, str], dest: Path, run=None) -> Path:
@@ -227,9 +300,16 @@ def download_sbom(repo: str, found: dict[str, str], dest: Path, run=None) -> Pat
     return path
 
 
-def upload_saved_sbom(tag: str, repo: str, dest: Path, run=None) -> list[str]:
+def upload_saved_sbom(
+    tag: str,
+    repo: str,
+    dest: Path,
+    run=None,
+    tags=None,
+    is_ancestor=None,
+) -> list[str]:
     repo = repo_name(repo)
-    found = locate_sbom(repo, run=run)
+    found = locate_sbom(repo, tag, run=run, tags=tags, is_ancestor=is_ancestor)
     path = download_sbom(repo, found, dest, run=run)
     return upload_release_asset(tag, path, repo, run=run)
 
@@ -241,6 +321,43 @@ def _fetch() -> None:
     result = _run(["git", "fetch", "origin", "refs/tags/v*:refs/tags/v*"])
     if result.returncode != 0:
         raise SystemExit(result.stderr.strip() or "git fetch tags failed")
+
+
+def _parent(commit: str) -> str:
+    result = _run(["git", "rev-parse", f"{commit}^"])
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def version_tags() -> list[dict]:
+    """Version tags newest first, each with its commit and that commit's parent."""
+    result = _run(
+        [
+            "git",
+            "for-each-ref",
+            "--sort=-v:refname",
+            "--format=%(refname:short) %(objectname) %(*objectname)",
+            "refs/tags/v*",
+        ]
+    )
+    if result.returncode != 0:
+        raise SystemExit(result.stderr.strip() or "listing version tags failed")
+    tags: list[dict] = []
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if not parts or not TAG_RE.fullmatch(parts[0]):
+            continue
+        commit = parts[2] if len(parts) > 2 and parts[2] else parts[1]
+        tags.append({"name": parts[0], "sha": commit, "parent": _parent(commit)})
+    return tags
+
+
+def _is_ancestor(ancestor: str, descendant: str) -> bool:
+    if not ancestor or not descendant:
+        return False
+    result = _run(["git", "merge-base", "--is-ancestor", ancestor, descendant])
+    return result.returncode == 0
 
 
 def latest_tag() -> str:
@@ -279,38 +396,27 @@ def _assets(tag: str) -> tuple[bool, int]:
     raise SystemExit(result.stderr.strip() or f"gh release view {tag} failed")
 
 
-def publish_succeeded(repo: str, run=None) -> bool:
-    """True when the newest completed Release run published to PyPI.
+def publish_succeeded(repo: str, tag: str, run=None, tags=None, is_ancestor=None) -> bool:
+    """True when a completed Release run for ``tag`` published to PyPI.
 
-    A lookup failure aborts. It does not fall through to a new tag.
+    The newest run is not enough: an SBOM-only retry skips PyPI. A lookup
+    failure aborts. It does not fall through to a new tag.
     """
+    if not TAG_RE.fullmatch(tag):
+        raise SystemExit(f"refusing {tag}; expected vX.Y.Z")
     repo = repo_name(repo)
     runner = run or _run
-    listed = _json(
+    if tags is None:
+        tags = version_tags()
+    ancestor = _is_ancestor if is_ancestor is None else is_ancestor
+    discovered = discover_release_runs(
+        repo,
         runner,
-        [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            repo,
-            "--workflow",
-            "release.yml",
-            "--limit",
-            "15",
-            "--json",
-            "databaseId,status,conclusion",
-        ],
+        tags,
+        ancestor,
+        with_artifacts=False,
     )
-    for item in listed:
-        if item.get("status") != "completed":
-            continue
-        viewed = _json(
-            runner,
-            ["gh", "run", "view", str(item["databaseId"]), "--repo", repo, "--json", "jobs"],
-        )
-        return job_conclusion(viewed.get("jobs") or [], "Publish to PyPI") == "success"
-    return False
+    return pypi_succeeded_for_tag(discovered, tag)
 
 
 def resolve(requested: str | None = None, expect: str | None = None) -> dict:
@@ -333,7 +439,7 @@ def resolve(requested: str | None = None, expect: str | None = None) -> dict:
             raise SystemExit(f"refusing {requested}; it is not on origin/main")
         return {"action": "continue", "tag": ""}
     exists, count = _assets(tag)
-    pypi_succeeded = publish_succeeded(repo_name()) if exists and count == 0 else False
+    pypi_succeeded = publish_succeeded(repo_name(), tag) if exists and count == 0 else False
     decision = plan(tag, _subject(tag), exists, count, pypi_succeeded=pypi_succeeded)
     if requested and decision["action"] not in {"recover", "sbom"}:
         raise SystemExit(f"refusing {requested}; it is not an unfinished release")
@@ -367,35 +473,104 @@ def self_test() -> None:
         raise SystemExit("a mismatched release commit was reused")
     if plan("not-a-tag", subject, True, 0)["action"] != "continue":
         raise SystemExit("a non-version tag was reused")
-    saved = select_saved_sbom(
-        [
-            {
-                "databaseId": 9,
-                "status": "completed",
-                "jobs": [
-                    {"name": "Publish to PyPI", "conclusion": "success"},
-                    {"name": "Release SBOM", "conclusion": "success"},
-                ],
-                "artifact_names": ["ferroguard.spdx.json"],
-            },
-            {
-                "databaseId": 42093909645,
-                "status": "completed",
-                "jobs": [
-                    {"name": "Publish to PyPI", "conclusion": "success"},
-                    {"name": "Release SBOM", "conclusion": "failure"},
-                ],
-                "artifact_names": ["llm-guardrails-sbom.spdx.json", "sdist"],
-            },
-        ]
-    )
+    history = [
+        {
+            "databaseId": 51,
+            "status": "completed",
+            "tag": "v0.3.1",
+            "jobs": [
+                {"name": "Publish to PyPI", "conclusion": "skipped"},
+                {"name": "Release SBOM", "conclusion": "failure"},
+            ],
+            "artifact_names": [],
+        },
+        {
+            "databaseId": 50,
+            "status": "completed",
+            "tag": "v0.3.1",
+            "jobs": [
+                {"name": "Publish to PyPI", "conclusion": "skipped"},
+                {"name": "Release SBOM", "conclusion": "failure"},
+            ],
+            "artifact_names": [],
+        },
+        {
+            "databaseId": 10,
+            "status": "completed",
+            "tag": "v0.3.0",
+            "jobs": [
+                {"name": "Publish to PyPI", "conclusion": "success"},
+                {"name": "Release SBOM", "conclusion": "failure"},
+            ],
+            "artifact_names": ["ferroguard.spdx.json"],
+        },
+        {
+            "databaseId": 9,
+            "status": "completed",
+            "tag": "v0.3.1",
+            "jobs": [
+                {"name": "Publish to PyPI", "conclusion": "success"},
+                {"name": "Release SBOM", "conclusion": "success"},
+            ],
+            "artifact_names": ["ferroguard.spdx.json"],
+        },
+        {
+            "databaseId": 42093909645,
+            "status": "completed",
+            "tag": "v0.3.1",
+            "jobs": [
+                {"name": "Publish to PyPI", "conclusion": "success"},
+                {"name": "Release SBOM", "conclusion": "failure"},
+            ],
+            "artifact_names": ["llm-guardrails-sbom.spdx.json", "sdist"],
+        },
+    ]
+    if not pypi_succeeded_for_tag(history, "v0.3.1"):
+        raise SystemExit("a skipped SBOM retry erased the PyPI success")
+    skipped_only = [run for run in history if run["databaseId"] in {51, 50, 10}]
+    if pypi_succeeded_for_tag(skipped_only, "v0.3.1"):
+        raise SystemExit("skipped retries or another tag counted as publication")
+    saved = select_saved_sbom(history, "v0.3.1")
     if saved != {"run_id": "42093909645", "name": "llm-guardrails-sbom.spdx.json"}:
         raise SystemExit(f"saved SBOM was not the failed run: {saved}")
+    if select_saved_sbom(history, "v0.3.0")["run_id"] != "10":
+        raise SystemExit("an older release SBOM was mixed with v0.3.1")
+    tags = [
+        {"name": "v0.3.2", "sha": "t32", "parent": "p32"},
+        {"name": "v0.3.1", "sha": "t31", "parent": "p31"},
+        {"name": "v0.3.0", "sha": "t30", "parent": "p30"},
+    ]
+    ancestors = {
+        ("t30", "p31"),
+        ("t31", "mid"),
+        ("t30", "mid"),
+        ("t31", "p32"),
+        ("t30", "p32"),
+        ("t32", "later"),
+        ("t31", "later"),
+        ("t30", "later"),
+        ("t30", "old"),
+    }
+
+    def is_ancestor(ancestor: str, descendant: str) -> bool:
+        return (ancestor, descendant) in ancestors
+
+    if assign_tag("p31", tags, is_ancestor) != "v0.3.1":
+        raise SystemExit("the run that created v0.3.1 was given another tag")
+    if assign_tag("mid", tags, is_ancestor) != "v0.3.1":
+        raise SystemExit("a v0.3.1 retry was given another tag")
+    if assign_tag("p32", tags, is_ancestor) != "v0.3.2":
+        raise SystemExit("the run that created v0.3.2 stayed on v0.3.1")
+    if assign_tag("later", tags, is_ancestor) != "v0.3.2":
+        raise SystemExit("a newer tag did not hide the older release")
+    if assign_tag("old", tags, is_ancestor) != "v0.3.0":
+        raise SystemExit("an older release was pulled onto v0.3.1")
     preferred = select_saved_sbom(
         [
             {
                 "databaseId": 1,
                 "status": "completed",
+                "tag": "v0.3.1",
                 "jobs": [
                     {"name": "Publish to PyPI", "conclusion": "success"},
                     {"name": "Release SBOM", "conclusion": "failure"},
@@ -405,7 +580,8 @@ def self_test() -> None:
                     "ferroguard.spdx.json",
                 ],
             }
-        ]
+        ],
+        "v0.3.1",
     )
     if preferred["name"] != "ferroguard.spdx.json":
         raise SystemExit(f"current SBOM name was not preferred: {preferred}")
@@ -433,7 +609,12 @@ def self_test() -> None:
         if argv != expected or seen != [expected]:
             raise SystemExit(f"upload invocation changed: {argv}")
         try:
-            upload_release_asset("v0.3.1", directory / "ferroguard.spdx.json", DEFAULT_REPO, run=fake)
+            upload_release_asset(
+                "v0.3.1",
+                directory / "ferroguard.spdx.json",
+                DEFAULT_REPO,
+                run=fake,
+            )
         except SystemExit as exc:
             if "not found" not in str(exc):
                 raise
