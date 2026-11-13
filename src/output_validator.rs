@@ -234,3 +234,42 @@ mod tests {
         assert_eq!(score, 0.0);
     }
 }
+
+#[cfg(test)]
+mod properties {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn short_text() -> impl Strategy<Value = String> {
+        prop::collection::vec(any::<char>(), 0..=32).prop_map(|chars| chars.into_iter().collect())
+    }
+
+    proptest! {
+        #![proptest_config(crate::property_config())]
+
+        #[test]
+        fn json_parse_matches_serde(text in short_text()) {
+            let score = hallucination_score(&text);
+            prop_assert!((0.0..=1.0).contains(&score));
+            let issues = check_json(&text, r#"{"type":"object","required":["ok"]}"#);
+            match serde_json::from_str::<serde_json::Value>(&text) {
+                Err(_) => {
+                    prop_assert!(issues.iter().any(|issue| issue.message.contains("not valid JSON")));
+                }
+                Ok(value) if value.is_object() => {
+                    prop_assert!(!issues.iter().any(|issue| issue.message.contains("not valid JSON")));
+                    let missing = !value.as_object().unwrap().contains_key("ok");
+                    prop_assert_eq!(
+                        issues.iter().any(|issue| issue.message.contains("Required key missing")),
+                        missing
+                    );
+                }
+                Ok(_) => {
+                    prop_assert!(issues
+                        .iter()
+                        .any(|issue| issue.message.contains("Expected a JSON object")));
+                }
+            }
+        }
+    }
+}
