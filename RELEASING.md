@@ -82,6 +82,10 @@ dispatch. The PyPI job is unchanged: it stays in this workflow, uses the
 `pypi` environment, and runs from the push to `main` that merging the
 release pull request starts. There is no tag trigger.
 
+When this opens a version, it closes any older open pull request whose head
+is `release/vX.Y.Z` and deletes that branch. The same guard refuses every
+other name, including `main`.
+
 Squash-merge the pull request so the commit subject stays
 `🔖 chore(release): vX.Y.Z`. That merge starts this workflow again. The
 `ship` job runs `scripts/release_publish.py publish-tag`, which creates the

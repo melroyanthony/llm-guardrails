@@ -221,6 +221,19 @@ def _refuse_branch_delete(branch: str) -> None:
         raise SystemExit(f"refusing to delete {branch}")
 
 
+def older_release_heads(heads: list[str], version: str) -> list[str]:
+    """Release branches to close when ``version`` is the one being opened.
+
+    ``main`` and this version's own branch are never selected.
+    """
+    current = release_branch(version)
+    return [
+        head
+        for head in heads
+        if head != current and re.fullmatch(r"release/v\d+\.\d+\.\d+", head) is not None
+    ]
+
+
 def _branch_exists(branch: str) -> bool:
     remote = subprocess.run(
         ["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
@@ -339,6 +352,66 @@ def _ensure_pr(decision: dict) -> None:
     )
 
 
+def _open_release_prs() -> list[tuple[int, str]]:
+    result = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--base",
+            "main",
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,headRefName",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout or "[]")
+    return [(int(item["number"]), str(item["headRefName"])) for item in payload]
+
+
+def _close_older_release_prs(version: str) -> None:
+    """Close older ``release/vX.Y.Z`` pull requests and delete those branches."""
+    current = release_branch(version)
+    for number, head in _open_release_prs():
+        if head not in older_release_heads([head], version):
+            continue
+        _refuse_branch_delete(head)
+        print(f"closing #{number} ({head}); superseded by {current}", flush=True)
+        _run(
+            [
+                "gh",
+                "pr",
+                "close",
+                str(number),
+                "--comment",
+                f"Superseded by {current}.",
+            ],
+            dry_run=False,
+        )
+        deleted = subprocess.run(
+            ["git", "push", "origin", "--delete", head],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        sys.stdout.write(deleted.stdout)
+        sys.stderr.write(deleted.stderr)
+        if deleted.returncode == 0:
+            continue
+        detail = deleted.stderr + deleted.stdout
+        if "remote ref does not exist" in detail:
+            continue
+        raise SystemExit(f"could not delete {head}:\n{deleted.stderr}")
+
+
 def publish_tag(decision: dict, dry_run: bool) -> None:
     """Push ``vX.Y.Z`` and create the GitHub Release. Does not move an existing tag."""
     if decision.get("action") != "publish":
@@ -382,6 +455,7 @@ def open_release_pr(decision: dict, dry_run: bool, decision_path: str | None = N
         return
     if _release_branch_current(decision):
         _ensure_pr(decision)
+        _close_older_release_prs(decision["version"])
         return
     head = _output(["git", "rev-parse", "HEAD"])
     origin = _output(["git", "rev-parse", "origin/main"])
@@ -397,6 +471,7 @@ def open_release_pr(decision: dict, dry_run: bool, decision_path: str | None = N
         raise SystemExit("release files were unchanged but HEAD is not the release commit")
     _push_release_branch(decision)
     _ensure_pr(decision)
+    _close_older_release_prs(decision["version"])
 
 
 def publish_merged(dry_run: bool) -> None:
@@ -445,6 +520,22 @@ def self_test() -> None:
         pass
     else:
         raise SystemExit("delete of main was allowed")
+    _refuse_branch_delete("release/v0.1.0")
+    retired = older_release_heads(
+        [
+            "main",
+            "release/v0.1.0",
+            "release/v0.3.0",
+            "cursor/other",
+            "release/v0.3",
+            "release/not-a-version",
+        ],
+        "0.3.0",
+    )
+    if retired != ["release/v0.1.0"]:
+        raise SystemExit(f"older release heads: {retired}")
+    if older_release_heads(["main"], "0.3.0"):
+        raise SystemExit("main was selected for deletion")
     if not _push_rejected("! [rejected] main -> main (non-fast-forward)"):
         raise SystemExit("non-fast-forward was not treated as a retry")
     if _push_rejected("fatal: could not read Username"):
