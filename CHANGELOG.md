@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+* CI builds the demo image and fails unless `/health` returns HTTP 200. The image is not pushed.
+
 ## [0.3.6](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.6) (2026-11-13)
 
 ### Bug Fixes

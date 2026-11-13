@@ -164,3 +164,23 @@ jobs:
             # -P keeps the checkout off sys.path, so this imports the wheel.
             "/tmp/smoke-$py/bin/python" -P -c "import llm_guardrails; from importlib.metadata import version; from llm_guardrails._core import pii_redact; text, mapping = pii_redact('Mail a@b.co'); assert 'site-packages' in llm_guardrails.__file__; assert 'a@b.co' not in text and mapping; assert version('ferroguard'); print(version('ferroguard'), llm_guardrails.__file__, text)"
           done
+
+  docker:
+    name: Docker smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the image
+        run: docker build --tag llm-guardrails:ci .
+
+      - name: Start the container and require HTTP 200 from /health
+        run: |
+          set -euo pipefail
+          docker run --detach --name llm-guardrails-ci --publish 127.0.0.1:18080:8000 llm-guardrails:ci
+          trap 'docker logs llm-guardrails-ci || true; docker rm --force llm-guardrails-ci >/dev/null || true' EXIT
+          sh scripts/docker_health_smoke.sh http://127.0.0.1:18080/health 90
