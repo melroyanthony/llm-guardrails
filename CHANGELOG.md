@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.7](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.7) (2026-11-13)
+
+### CI
+
+* ci(docker): build the Dockerfile and smoke /health
+
 ## [0.3.6](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.6) (2026-11-13)
 
 ### Bug Fixes
