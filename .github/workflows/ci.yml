@@ -164,3 +164,50 @@ jobs:
             # -P keeps the checkout off sys.path, so this imports the wheel.
             "/tmp/smoke-$py/bin/python" -P -c "import llm_guardrails; from importlib.metadata import version; from llm_guardrails._core import pii_redact; text, mapping = pii_redact('Mail a@b.co'); assert 'site-packages' in llm_guardrails.__file__; assert 'a@b.co' not in text and mapping; assert version('ferroguard'); print(version('ferroguard'), llm_guardrails.__file__, text)"
           done
+
+  docker:
+    name: Docker /health
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The image stays on this runner. This job does not log in to a registry.
+      - name: Build the image
+        run: docker build --tag llm-guardrails:ci .
+
+      - name: Start the container and require HTTP 200 from /health
+        run: |
+          set -euo pipefail
+          name=llm-guardrails-ci
+          docker run --detach --name "$name" --publish 127.0.0.1:8000:8000 llm-guardrails:ci
+          cleanup() {
+            docker logs "$name" >&2 || true
+            docker rm --force "$name" >/dev/null || true
+          }
+          trap cleanup EXIT
+          deadline=$((SECONDS + 60))
+          while true; do
+            running="$(docker inspect --format '{{.State.Running}}' "$name")"
+            if [ "$running" != "true" ]; then
+              echo "container exited before /health returned 200" >&2
+              exit 1
+            fi
+            code="$(curl --silent --output /tmp/health-body --write-out '%{http_code}' --max-time 2 http://127.0.0.1:8000/health || true)"
+            if [ "$code" = "200" ]; then
+              echo "GET /health returned 200"
+              exit 0
+            fi
+            if [ -n "$code" ] && [ "$code" != "000" ]; then
+              echo "GET /health returned HTTP ${code}, expected 200" >&2
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "GET /health did not return 200 within 60s" >&2
+              exit 1
+            fi
+            sleep 2
+          done

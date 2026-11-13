@@ -126,6 +126,24 @@ def test_release_publishes_inside_release_yml():
     assert "3.14" in ci
 
 
+def test_ci_builds_dockerfile_and_smokes_health():
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "docker push" not in workflow
+    assert "permissions: {}" in workflow.split("jobs:", 1)[0]
+    docker = workflow.split("\n  docker:", 1)[1]
+    header, _, steps = docker.partition("steps:")
+    assert "contents: read" in header
+    assert "contents: write" not in docker
+    assert "id-token:" not in docker
+    assert "packages:" not in docker
+    assert "docker build --tag llm-guardrails:ci ." in steps
+    assert "http://127.0.0.1:8000/health" in steps
+    assert "SECONDS + 60" in steps
+    assert '[ "$code" = "200" ]' in steps
+    assert "expected 200" in steps
+    assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1" in steps
+
+
 _TOKEN = re.compile(r"!cancelled\(\)|&&|\|\||==|\(|\)|'[^']*'|[A-Za-z_][\w.]*")
 _JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 _IF = re.compile(r"^    if:\s*(.+)$")
