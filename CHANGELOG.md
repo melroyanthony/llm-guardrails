@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+* The demo image uses `python:3.14-slim`, still pinned by its index digest. Dependabot ignores Python image tags 3.15 and newer.
+
 ## [0.3.5](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.5) (2026-11-05)
 
 ### Documentation

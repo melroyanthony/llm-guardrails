@@ -41,6 +41,9 @@ updates:
       docker:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "python"
+        versions: [">=3.15"]
 
   - package-ecosystem: github-actions
     directory: /
