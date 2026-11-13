@@ -86,9 +86,19 @@ def test_release_publishes_inside_release_yml():
     assert "enable-cache: false" in wheels_job
     assert "needs.selected.outputs.mode == 'wheels'" in wheels_job
     assert "needs.selected.outputs.mode == 'wheels'" in pypi
-    release_job = jobs.split("\n  release:", 1)[1].split("\n  recover:", 1)[0]
+    release_job = jobs.split("\n  release:", 1)[1].split("\n  ship:", 1)[0]
     assert "actions: read" in release_job
+    assert "pull-requests: write" in release_job
     assert "id-token:" not in release_job
+    assert "release_publish.py open-pr" in release_job
+    ship_job = jobs.split("\n  ship:", 1)[1].split("\n  recover:", 1)[0]
+    assert "release_publish.py publish-tag" in ship_job
+    assert "contents: write" in ship_job
+    assert "pull-requests: write" not in ship_job
+    assert "id-token:" not in ship_job
+    assert "git push origin HEAD:main" not in workflow
+    assert "on:\n  push:\n    branches: [main]" in workflow
+    assert "tags:" not in header
     recover_job = jobs.split("\n  recover:", 1)[1].split("\n  selected:", 1)[0]
     assert "contents: read" in recover_job
     assert "actions: read" in recover_job
@@ -272,6 +282,10 @@ def _simulate(
     results = dict(roots)
     ready_mode = mode if published == "true" else ""
     outputs: dict[str, dict[str, str]] = {
+        "ship": {
+            "published": published if results.get("ship") == "success" else "",
+            "mode": ready_mode if results.get("ship") == "success" else "",
+        },
         "release": {
             "published": published if results.get("release") == "success" else "",
             "mode": ready_mode if results.get("release") == "success" else "",
@@ -291,6 +305,7 @@ def _simulate(
         else:
             results[job] = "skipped"
         if job == "selected" and results[job] == "success":
+            ship_ready = results.get("ship") == "success" and outputs["ship"]["published"] == "true"
             release_ready = (
                 results.get("release") == "success" and outputs["release"]["published"] == "true"
             )
@@ -298,13 +313,16 @@ def _simulate(
                 results.get("recover") == "success" and outputs["recover"]["published"] == "true"
             )
             chosen = ""
-            if release_ready:
+            if ship_ready:
+                chosen = outputs["ship"].get("mode", "")
+            elif release_ready:
                 chosen = outputs["release"].get("mode", "")
             elif recover_ready:
                 chosen = outputs["recover"].get("mode", "")
+            ready = ship_ready or release_ready or recover_ready
             outputs[job] = {
-                "published": "true" if release_ready or recover_ready else "false",
-                "tag": "v0.3.1" if release_ready or recover_ready else "",
+                "published": "true" if ready else "false",
+                "tag": "v0.3.1" if ready else "",
                 "mode": chosen if chosen in {"wheels", "sbom"} else "skip",
             }
         else:
@@ -315,6 +333,7 @@ def _simulate(
 def test_release_gates_cover_push_dispatch_failure_and_cancellation():
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     conditions, needs = _workflow_controls(workflow)
+    assert needs["selected"] == ["release", "recover", "ship"]
     assert needs["wheels"] == ["selected"]
     assert needs["sdist"] == ["selected"]
     assert needs["pypi"] == ["selected", "wheels", "sdist"]
@@ -374,6 +393,15 @@ def test_release_gates_cover_push_dispatch_failure_and_cancellation():
     recover_failed = run({"release": "skipped", "recover": "failure"})
     assert recover_failed["selected"] == "skipped"
     assert recover_failed["pypi"] == "skipped"
+    merged = {"release": "skipped", "recover": "skipped", "ship": "success"}
+    tagged = run(merged)
+    assert tagged["wheels"] == "success"
+    assert tagged["sdist"] == "success"
+    assert tagged["pypi"] == "success"
+    assert tagged["sbom"] == "success"
+    ship_failed = run({"release": "skipped", "recover": "skipped", "ship": "failure"})
+    assert ship_failed["selected"] == "skipped"
+    assert ship_failed["pypi"] == "skipped"
 
 
 def _recover():

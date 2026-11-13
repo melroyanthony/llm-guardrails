@@ -10,8 +10,9 @@ wins, so a later patch does not hide an earlier minor. A subject of
 ``chore(release): vX.Y.Z`` is skipped, including when it is the tip, so the
 release commit does not start another release.
 
-``--self-test`` also checks that the workflow pushes that commit to ``main``
-without a force-push.
+``--self-test`` also checks that the workflow opens a release pull request
+and does not push that commit to ``main``. The tag and PyPI upload run in
+the workflow that starts when that pull request merges.
 """
 
 from __future__ import annotations
@@ -326,13 +327,46 @@ def prepend_changelog(existing: str, version: str, section: str, subject: str, d
     return prepend_changes(existing, version, [{"section": section, "subject": subject}], date)
 
 
+def release_branch(version: str) -> str:
+    """Branch that holds the release commit until it is merged."""
+    return f"release/v{version}"
+
+
+def release_pr_commands(decision: dict) -> list[Push]:
+    """Push the release commit to its own branch and open a pull request.
+
+    This does not push ``main`` and does not create a tag. PyPI runs later,
+    in the workflow started by merging the pull request.
+    """
+    if decision["action"] != "publish":
+        return []
+    branch = release_branch(decision["version"])
+    return [
+        ["git", "push", "origin", f"HEAD:{branch}"],
+        [
+            "gh",
+            "pr",
+            "create",
+            "--base",
+            "main",
+            "--head",
+            branch,
+            "--title",
+            decision["commit_subject"],
+        ],
+    ]
+
+
 def push_commands(decision: dict) -> list[Push]:
-    """Git and gh commands for a publish decision. The branch push is not a force-push."""
+    """Tag and GitHub Release commands after the release commit is on main.
+
+    The tag push is not a workflow trigger. Wheels and PyPI stay in the run
+    that merged the release pull request.
+    """
     if decision["action"] != "publish":
         return []
     tag = decision["tag"]
     return [
-        ["git", "push", "origin", "HEAD:main"],
         ["git", "push", "origin", tag],
         ["gh", "release", "create", tag, "--title", tag],
     ]
@@ -395,27 +429,35 @@ def _check_workflow_file() -> None:
         _fail("release workflow must set permissions: {} before jobs")
     if "contents: write" not in text:
         _fail("release job must set contents: write")
-    if "pull-requests:" in text:
-        _fail("release workflow must not request pull-requests permission")
-    if "release-pr" in text or "_ensure_pr" in publish or "def publish_pr" in publish:
-        _fail("release pull request path is still present")
-    if '["git", "push", "origin", "HEAD:main"]' not in publish:
-        _fail("release_publish.py must push HEAD:main")
+    if "pull-requests: write" not in text:
+        _fail("release job must set pull-requests: write to open the release pull request")
+    if "HEAD:main" in text or "HEAD:main" in publish:
+        _fail("release path must not push HEAD:main")
+    if "open-pr" not in text or "def open_release_pr" not in publish:
+        _fail("release pull request path is missing")
+    if "publish-tag" not in text or "def publish_merged" not in publish:
+        _fail("merged release must publish the tag inside release.yml")
+    if "tags:" in text.split("jobs:", 1)[0]:
+        _fail("release workflow must not trigger on tags")
 
 
 def _check_pushes_are_safe() -> None:
     decision = decide("✨ feat(api): stream a turn (#2)\n", "0.0.0", None)
-    commands = push_commands(decision)
-    saw_main = False
-    for argv in commands:
+    opened = release_pr_commands(decision)
+    if ["git", "push", "origin", "HEAD:release/v0.1.0"] not in opened:
+        _fail(f"release pull request does not push its branch: {opened}")
+    if not any(argv[:3] == ["gh", "pr", "create"] for argv in opened):
+        _fail(f"release pull request is not opened: {opened}")
+    tagged = push_commands(decision)
+    if ["git", "push", "origin", "v0.1.0"] not in tagged:
+        _fail(f"merged release does not push its tag: {tagged}")
+    for argv in opened + tagged:
         if "--force" in argv or "-f" in argv or "--tags" in argv or "--force-with-lease" in argv:
             _fail(f"unsafe push: {argv}")
         if argv == ["git", "push", "origin", "HEAD:main"]:
-            saw_main = True
-    if not saw_main:
-        _fail(f"publish does not push main: {commands}")
+            _fail(f"push to main is still present: {argv}")
     skipped = decide("🔖 chore(release): v0.1.0 (#3)\n", "0.1.0", None)
-    if push_commands(skipped):
+    if push_commands(skipped) or release_pr_commands(skipped):
         _fail("a release subject must not push")
 
 
@@ -963,8 +1005,7 @@ def commit_messages_since(tag: str | None, rev: str = "HEAD", cwd: Path | None =
     """Return full commit messages after ``tag`` up to ``rev``, oldest first.
 
     ``tag is None`` is every commit reachable from ``rev``. The release job
-    passes ``origin/main``: that is the parent of the commit about to be tagged.
-    ``HEAD`` stays on the push that started the workflow.
+    passes ``HEAD``: that is the push that opened the release pull request.
     """
     revision = rev if tag is None else f"{tag}..{rev}"
     result = subprocess.run(
@@ -1025,7 +1066,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rev",
         default="HEAD",
-        help="Tip of the range. The release job uses origin/main, the commit it tags.",
+        help="Tip of the range. The release job passes HEAD.",
     )
     return parser
 

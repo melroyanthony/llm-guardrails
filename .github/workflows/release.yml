@@ -38,6 +38,8 @@ jobs:
       mode: ${{ steps.publish.outputs.mode }}
     permissions:
       contents: write
+      # gh pr create for release/vX.Y.Z. This job does not push main.
+      pull-requests: write
       # Lists Release runs to see whether this tag already reached PyPI.
       actions: read
     steps:
@@ -46,7 +48,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Publish the release commit and tag
+      - name: Open the release pull request
         id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -79,15 +81,48 @@ jobs:
             echo "release skipped: ${action}"
             exit 0
           fi
-          python3 scripts/release_publish.py publish --decision-file /tmp/decision.json
+          python3 scripts/release_publish.py open-pr --decision-file /tmp/decision.json
           action="$(python3 -c 'import json; print(json.load(open("/tmp/decision.json"))["action"])')"
           if [ "$action" != "publish" ]; then
             echo "published=false" >> "$GITHUB_OUTPUT"
             echo "mode=skip" >> "$GITHUB_OUTPUT"
-            echo "release skipped after publish: ${action}"
+            echo "release skipped after open-pr: ${action}"
             exit 0
           fi
-          tag="$(python3 -c 'import json; print(json.load(open("/tmp/decision.json"))["tag"])')"
+          # The pull request is open. Tag and PyPI wait for a person to merge it.
+          echo "published=false" >> "$GITHUB_OUTPUT"
+          echo "mode=skip" >> "$GITHUB_OUTPUT"
+
+  # A person squash-merges the release pull request. This job tags that
+  # commit. It does not push main, so the run does not loop. Wheels and
+  # PyPI stay in this run: the tag push uses GITHUB_TOKEN and does not
+  # start another workflow.
+  ship:
+    name: Tag the merged release
+    if: github.event_name == 'push' && github.actor != 'github-actions[bot]' && (startsWith(github.event.head_commit.message, 'chore(release):') || startsWith(github.event.head_commit.message, '🔖 chore(release):'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      published: ${{ steps.tag.outputs.published }}
+      tag: ${{ steps.tag.outputs.tag }}
+      mode: ${{ steps.tag.outputs.mode }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Tag the merged release commit
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_publish.py publish-tag
+          version="$(tr -d '[:space:]' < .version)"
+          tag="v${version}"
           echo "published=true" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "mode=wheels" >> "$GITHUB_OUTPUT"
@@ -134,8 +169,8 @@ jobs:
   # One tag for the rest of the run: a new release, or the unfinished tag.
   selected:
     name: Select tag
-    needs: [release, recover]
-    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.recover.result == 'success') }}
+    needs: [release, recover, ship]
+    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.recover.result == 'success' || needs.ship.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -148,6 +183,9 @@ jobs:
       - name: Pick the tag
         id: pick
         env:
+          SHIP_PUBLISHED: ${{ needs.ship.outputs.published }}
+          SHIP_TAG: ${{ needs.ship.outputs.tag }}
+          SHIP_MODE: ${{ needs.ship.outputs.mode }}
           RELEASE_PUBLISHED: ${{ needs.release.outputs.published }}
           RELEASE_TAG: ${{ needs.release.outputs.tag }}
           RELEASE_MODE: ${{ needs.release.outputs.mode }}
@@ -156,7 +194,10 @@ jobs:
           RECOVER_MODE: ${{ needs.recover.outputs.mode }}
         run: |
           set -euo pipefail
-          if [ "$RELEASE_PUBLISHED" = "true" ]; then
+          if [ "$SHIP_PUBLISHED" = "true" ]; then
+            tag="$SHIP_TAG"
+            mode="$SHIP_MODE"
+          elif [ "$RELEASE_PUBLISHED" = "true" ]; then
             tag="$RELEASE_TAG"
             mode="$RELEASE_MODE"
           elif [ "$RECOVER_PUBLISHED" = "true" ]; then
@@ -179,8 +220,9 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
 
-  # The version commit is pushed with GITHUB_TOKEN, so a workflow that
-  # triggers on the tag never starts. Wheels and PyPI stay in this run.
+  # The tag is pushed with GITHUB_TOKEN in this run, after a person merges
+  # the release pull request. A workflow that triggers on the tag never
+  # starts. Wheels and PyPI stay in this run. PyPI uses trusted publishing.
   wheels:
     name: Wheel ${{ matrix.id }}
     needs: selected

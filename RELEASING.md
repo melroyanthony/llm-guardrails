@@ -1,23 +1,33 @@
 # Releasing
 
-A push to `main` publishes in one GitHub Actions run. The workflow is
+A push to `main` opens a release pull request. Merging that pull request
+publishes in the workflow run that the merge starts. The workflow is
 [`.github/workflows/release.yml`](.github/workflows/release.yml). It does not
-open a pull request. The same run builds the wheels and publishes them to PyPI.
-A workflow that started on the tag push would not run: the version commit is
-pushed with `GITHUB_TOKEN`.
+push `main`. PyPI trusted publishing runs in that merge run. A workflow that
+started on the tag push would not run: the tag is pushed with `GITHUB_TOKEN`.
 
-## When the job runs
+## When the jobs run
 
-The workflow triggers on a push to `main`. The job skips when the actor is
-`github-actions[bot]`, or when the head commit message starts with
-`chore(release):` or `🔖 chore(release):`. That commit is the release itself,
-so it does not start another release.
+The workflow triggers on a push to `main`.
 
-The workflow file sets `permissions: {}`. The release job sets
-`contents: write` and `actions: read`. It pushes to `main` with the workflow
-`GITHUB_TOKEN` and does not change branch protection. `actions: read` lets
-that job, and the dispatch `recover` job, list Release runs for the selected
-tag. The `recover` job stays `contents: read`, so it cannot push.
+The `release` job runs when the actor is not `github-actions[bot]` and the
+head commit message does not start with `chore(release):` or
+`🔖 chore(release):`. It opens `release/vX.Y.Z`. It does not tag and it does
+not publish.
+
+The `ship` job runs when the actor is not `github-actions[bot]` and the head
+commit message does start with one of those prefixes. That commit is the
+squash-merge of the release pull request. The job tags it. A merge performed
+by `github-actions[bot]` does not start the workflow, so a person merges the
+release pull request.
+
+The workflow file sets `permissions: {}`. The `release` job sets
+`contents: write`, `pull-requests: write`, and `actions: read`. It pushes
+`release/vX.Y.Z` and opens the pull request. It does not push `main`.
+`actions: read` lets that job, and the dispatch `recover` job, list Release
+runs for the selected tag. The `ship` job sets `contents: write` so it can
+push the tag and create the GitHub Release. The `recover` job stays
+`contents: read`, so it cannot push.
 
 ## Decide
 
@@ -46,7 +56,7 @@ instead of treating the whole history as unreleased.
 
 ## Publish
 
-`scripts/release_publish.py publish` writes that decision into:
+`scripts/release_publish.py open-pr` writes that decision into:
 
 - `.version`
 - `Cargo.toml` `[package].version`. `pyproject.toml` declares
@@ -59,16 +69,22 @@ generated commit lines. An empty Unreleased section falls back to those
 generated lines. The script leaves a fresh empty `## Unreleased` at the top.
 
 The commit subject is `🔖 chore(release): vX.Y.Z`, authored as
-`github-actions[bot]`. The job pushes it with
-`git push origin HEAD:main` and does not force-push. A non-fast-forward
-rejection is retried by rebuilding the commit on `origin/main`, up to four
-times. It then creates the `vX.Y.Z` tag on that commit, pushes the tag, and
-opens a GitHub Release whose notes point at `CHANGELOG.md`.
+`github-actions[bot]`. The job pushes that commit to `release/vX.Y.Z` and
+opens a pull request into `main`. It does not force-push. If that branch
+exists and is not based on current `main`, the job deletes only
+`release/vX.Y.Z` and pushes it again. It never deletes `main`.
+
+Squash-merge the pull request so the commit subject stays
+`🔖 chore(release): vX.Y.Z`. That merge starts this workflow again. The
+`ship` job runs `scripts/release_publish.py publish-tag`, which creates the
+`vX.Y.Z` tag on that commit, pushes the tag, and opens a GitHub Release
+whose notes point at `CHANGELOG.md`. It does not create another commit and
+it does not push `main`.
 
 A re-run against a version that is already the tip of `main`, or already
 tagged, does not create a second commit, tag, or GitHub Release. Wheel jobs
-still build when the decision stays `publish`, and the PyPI upload skips
-files that are already there.
+build when `ship` tags the merge, or when recovery still needs wheels. The
+PyPI upload skips files that are already there.
 
 ## Wheels and PyPI
 
