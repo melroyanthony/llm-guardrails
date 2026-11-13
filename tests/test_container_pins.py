@@ -10,7 +10,7 @@ SECURITY = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 VERIFIER = ROOT / "scripts" / "verify_rustup_init.sh"
 
-PYTHON_DIGEST = "sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54"
+PYTHON_DIGEST = "sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f"
 UV_DIGEST = "sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490"
 RUSTUP_VERSION = "1.29.3"
 RUSTUP_AMD64 = "b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55"
@@ -23,9 +23,10 @@ ACKNOWLEDGEMENT = (
 
 
 def test_base_images_and_uv_are_digest_pinned():
-    assert DOCKERFILE.count(f"python:3.12-slim@{PYTHON_DIGEST}") == 2
+    assert DOCKERFILE.count(f"python:3.14-slim@{PYTHON_DIGEST}") == 2
     assert DOCKERFILE.count(f"ghcr.io/astral-sh/uv:0.13.7@{UV_DIGEST}") == 2
-    assert "python:3.12-slim\n" not in DOCKERFILE
+    assert "python:3.12-slim" not in DOCKERFILE
+    assert "python:3.14-slim\n" not in DOCKERFILE
     assert "uv:0.13.7 /uv" not in DOCKERFILE
 
 
@@ -45,7 +46,16 @@ def test_rustup_installer_is_checksum_verified_and_channel_stays_stable():
 def test_readme_documents_digest_updates_and_installer_refresh():
     assert "Dependabot" in README
     assert "docker" in README
+    assert "python:3.14-slim" in README
+    assert "3.15" in README
     assert RUSTUP_VERSION in README
+
+
+def test_dependabot_ignores_python_3_15_and_newer():
+    dependabot = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+    assert "package-ecosystem: docker" in dependabot
+    assert 'dependency-name: "python"' in dependabot
+    assert '">=3.15"' in dependabot
 
 
 def test_security_policy_names_disclosure_without_a_new_contact_or_deadline():

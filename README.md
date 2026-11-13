@@ -146,10 +146,11 @@ curl -s -X POST http://localhost:8000/guard/input \
 
 ### Demo image
 
-The image in `Dockerfile` builds a wheel on `python:3.12-slim`, installs that wheel plus
+The image in `Dockerfile` builds a wheel on `python:3.14-slim`, installs that wheel plus
 FastAPI and `uvicorn[standard]>=0.54.0,<1.0`, and serves `api.main:app` on port 8000.
 The Python and uv image references include a digest. Dependabot's weekly `docker` group
-opens a pull request when those digests move. The Rust channel stays `stable`. The image
+opens a pull request when those digests move, and it ignores Python image tags `3.15`
+and newer. The Rust channel stays `stable`. The image
 downloads rustup-init `1.29.3` and checks its SHA256 before running it. Refreshing that
 installer means changing `RUSTUP_VERSION` and both architecture checksums in the same
 edit. Dependabot does not change those checksums. The image does not load `.env-template`.
