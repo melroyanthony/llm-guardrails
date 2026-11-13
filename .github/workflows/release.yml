@@ -40,8 +40,8 @@ jobs:
       contents: write
       # gh pr create for release/vX.Y.Z. This job does not push main.
       pull-requests: write
-      # Lists Release runs to see whether this tag already reached PyPI.
-      actions: read
+      # Dispatch ci.yml on the release branch, and list Release runs.
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -88,6 +88,15 @@ jobs:
             echo "mode=skip" >> "$GITHUB_OUTPUT"
             echo "release skipped after open-pr: ${action}"
             exit 0
+          fi
+          # _ensure_pr has opened the pull request. GITHUB_TOKEN does not
+          # start pull_request workflows, so dispatch CI on that branch.
+          version="$(python3 -c 'import json; print(json.load(open("/tmp/decision.json"))["version"])')"
+          ref="release/v${version}"
+          if git ls-remote --exit-code --heads origin "refs/heads/${ref}" >/dev/null 2>&1; then
+            gh workflow run ci.yml --ref "$ref"
+          else
+            echo "no ${ref}; CI was not dispatched"
           fi
           # The pull request is open. Tag and PyPI wait for a person to merge it.
           echo "published=false" >> "$GITHUB_OUTPUT"

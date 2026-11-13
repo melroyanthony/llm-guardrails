@@ -87,7 +87,10 @@ def test_release_publishes_inside_release_yml():
     assert "needs.selected.outputs.mode == 'wheels'" in wheels_job
     assert "needs.selected.outputs.mode == 'wheels'" in pypi
     release_job = jobs.split("\n  release:", 1)[1].split("\n  ship:", 1)[0]
-    assert "actions: read" in release_job
+    assert "actions: write" in release_job
+    assert "actions: read" not in release_job
+    assert "gh workflow run ci.yml --ref" in release_job
+    assert "actions: write" not in workflow.split("\n  ship:", 1)[1]
     assert "pull-requests: write" in release_job
     assert "id-token:" not in release_job
     assert "release_publish.py open-pr" in release_job
@@ -127,6 +130,7 @@ def test_release_publishes_inside_release_yml():
     assert "ossf/scorecard-action@" in scorecard
     assert "publish_results: true" in scorecard
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "workflow_dispatch:" in ci.split("jobs:", 1)[0]
     assert "PyO3/maturin-action@" in ci
     assert "manylinux: auto" in ci
     assert "target: x86_64" in ci

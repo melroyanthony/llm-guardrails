@@ -22,12 +22,12 @@ by `github-actions[bot]` does not start the workflow, so a person merges the
 release pull request.
 
 The workflow file sets `permissions: {}`. The `release` job sets
-`contents: write`, `pull-requests: write`, and `actions: read`. It pushes
+`contents: write`, `pull-requests: write`, and `actions: write`. It pushes
 `release/vX.Y.Z` and opens the pull request. It does not push `main`.
-`actions: read` lets that job, and the dispatch `recover` job, list Release
-runs for the selected tag. The `ship` job sets `contents: write` so it can
-push the tag and create the GitHub Release. The `recover` job stays
-`contents: read`, so it cannot push.
+`actions: write` is only on that job. It dispatches CI and lists Release
+runs for an unfinished tag. The `recover` job stays `actions: read`. The
+`ship` job sets `contents: write` so it can push the tag and create the
+GitHub Release. The `recover` job stays `contents: read`, so it cannot push.
 
 ## Decide
 
@@ -73,6 +73,14 @@ The commit subject is `🔖 chore(release): vX.Y.Z`, authored as
 opens a pull request into `main`. It does not force-push. If that branch
 exists and is not based on current `main`, the job deletes only
 `release/vX.Y.Z` and pushes it again. It never deletes `main`.
+
+That pull request is opened with `GITHUB_TOKEN`, so the `pull_request`
+event does not start CI. After `_ensure_pr`, the release job runs
+`gh workflow run ci.yml --ref release/vX.Y.Z`. `ci.yml` allows
+`workflow_dispatch`. The checks on the release pull request come from that
+dispatch. The PyPI job is unchanged: it stays in this workflow, uses the
+`pypi` environment, and runs from the push to `main` that merging the
+release pull request starts. There is no tag trigger.
 
 Squash-merge the pull request so the commit subject stays
 `🔖 chore(release): vX.Y.Z`. That merge starts this workflow again. The
