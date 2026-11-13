@@ -36,7 +36,7 @@ When an intent matches a skill under `.claude/skills/`, read that skill before a
 - **Rust.** `cargo fmt` and `cargo clippy --all-targets -- -D warnings` must pass. Guard behaviour lives in `src/`. Fallible paths return `Result`. `Regex::new` inside a `Lazy` static may panic: a bad pattern is a programmer error. Do not add `unwrap` on caller input.
 - **Python.** Wrappers stay thin. Detection logic does not move back into `llm_guardrails/`. Tooling is `uv` only. Ruff lints and formats. `target-version` is `py311`. pytest and ruff are the default `dev` dependency group. The `api` extra is FastAPI. `uv sync --locked --all-extras` installs both. There is no `dev` extra.
 - **API.** `api/main.py` calls `GuardrailsPipeline`. It does not grow its own checks and it does not load environment variables.
-- **Release.** A releasable push to `main` commits the version bump and publishes the tag in one run. The highest bump since the last tag wins. `chore(release)` does not bump again. The job pushes that commit to `main` without force, then pushes the tag. The same run builds the abi3 wheels and sdist from that tag and publishes them to PyPI. A workflow triggered by the tag push would not start.
+- **Release.** A releasable push to `main` opens a release pull request. The highest bump since the last tag wins. `chore(release)` does not bump again. The job commits `🔖 chore(release): vX.Y.Z` on `release/vX.Y.Z` and does not push `main`. A person squash-merges that pull request. That merge starts the workflow again, which tags the commit in the same run, builds the abi3 wheels and sdist, and publishes them to PyPI with trusted publishing. A tag push does not start that work: `GITHUB_TOKEN` would not trigger another workflow.
 
 ## Delivery process
 

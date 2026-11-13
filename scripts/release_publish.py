@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Commit a release on main, push it, and publish the tag.
+"""Open a release pull request, and tag that commit after it merges.
 
 The workflow passes ``GH_TOKEN`` (``GITHUB_TOKEN``). The release commit is
-authored as ``github-actions[bot]``. A non-fast-forward push is retried by
-rebuilding the commit on ``origin/main``. This script never force-pushes.
-This script does not upload to PyPI. The release workflow builds the
-wheels from the tag this script pushes and publishes those.
+authored as ``github-actions[bot]`` on ``release/vX.Y.Z``. This script never
+pushes ``main`` and never force-pushes. A person merges the pull request.
+That merge starts ``release.yml`` again, and this same run pushes the tag,
+builds the wheels, and publishes them to PyPI. A tag push does not start
+that work: ``GITHUB_TOKEN`` would not trigger another workflow.
 
 Re-running against a version that is already the tip of ``main``, or already
 tagged, does not create a second commit, tag, or GitHub Release.
@@ -25,12 +26,15 @@ from pathlib import Path
 
 from release_subject import (
     RELEASE_SUBJECT,
+    RELEASE_TITLE,
     ROOT,
     _subject_of,
     classify_tip,
     decide_unreleased,
     prepend_changes,
     push_commands,
+    release_branch,
+    release_pr_commands,
 )
 
 VERSION_PATH = ROOT / ".version"
@@ -207,51 +211,205 @@ def _commit_release(decision: dict) -> bool:
     return True
 
 
-def _published_rev(decision: dict) -> str | None:
-    """A rev that already is this release, so a re-run must not commit again."""
-    version = decision["version"]
-    tag = decision["tag"]
-    subprocess.run(["git", "fetch", "origin", "main"], cwd=ROOT, check=True)
-    subprocess.run(["git", "fetch", "origin", "tag", tag], cwd=ROOT, check=False)
-    if _is_this_release("origin/main", version):
-        return "origin/main"
-    if _tag_exists(tag):
-        return f"refs/tags/{tag}"
-    return None
-
-
 def _checkout(rev: str) -> None:
     _run(["git", "checkout", "--detach", rev], dry_run=False)
 
 
-def _push_main(decision: dict) -> None:
-    """Push HEAD to main. On a rejected update, rebuild the commit and try again."""
-    version = decision["version"]
-    for attempt in range(1, 5):
-        result = subprocess.run(
-            ["git", "push", "origin", "HEAD:main"],
+def _refuse_branch_delete(branch: str) -> None:
+    """Only a ``release/vX.Y.Z`` branch may be replaced. ``main`` may not."""
+    if not re.fullmatch(r"release/v\d+\.\d+\.\d+", branch):
+        raise SystemExit(f"refusing to delete {branch}")
+
+
+def older_release_heads(heads: list[str], version: str) -> list[str]:
+    """Release branches to close when ``version`` is the one being opened.
+
+    ``main`` and this version's own branch are never selected.
+    """
+    current = release_branch(version)
+    return [
+        head
+        for head in heads
+        if head != current and re.fullmatch(r"release/v\d+\.\d+\.\d+", head) is not None
+    ]
+
+
+def _branch_exists(branch: str) -> bool:
+    remote = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return remote.returncode == 0 and bool(remote.stdout.strip())
+
+
+def _release_branch_current(decision: dict) -> bool:
+    """True when the release branch is this version and its parent is main."""
+    branch = release_branch(decision["version"])
+    if not _branch_exists(branch):
+        return False
+    subprocess.run(["git", "fetch", "origin", branch], cwd=ROOT, check=True)
+    remote = f"origin/{branch}"
+    if not _is_this_release(remote, decision["version"]):
+        return False
+    parent = _output(["git", "rev-parse", f"{remote}^"])
+    main = _output(["git", "rev-parse", "origin/main"])
+    return parent == main
+
+
+def _push_release_branch(decision: dict) -> None:
+    """Push the release commit to ``release/vX.Y.Z``. Never push ``main``."""
+    branch = release_branch(decision["version"])
+    refspec = f"HEAD:{branch}"
+    result = subprocess.run(
+        ["git", "push", "origin", refspec],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    if result.returncode == 0:
+        return
+    if not _push_rejected(result.stderr + result.stdout):
+        raise SystemExit(f"git push origin {refspec} failed:\n{result.stderr}")
+    _refuse_branch_delete(branch)
+    print(f"# replacing {branch}; it is not based on current main", flush=True)
+    deleted = subprocess.run(
+        ["git", "push", "origin", "--delete", branch],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    sys.stdout.write(deleted.stdout)
+    sys.stderr.write(deleted.stderr)
+    if deleted.returncode != 0:
+        raise SystemExit(f"could not replace {branch}:\n{deleted.stderr}")
+    _run(["git", "push", "origin", refspec], dry_run=False)
+
+
+def _open_pr_numbers(branch: str) -> list[int]:
+    result = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--base",
+            "main",
+            "--state",
+            "open",
+            "--json",
+            "number",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout or "[]")
+    return [int(item["number"]) for item in payload]
+
+
+def _ensure_pr(decision: dict) -> None:
+    """Open the release pull request when one is not already open."""
+    branch = release_branch(decision["version"])
+    numbers = _open_pr_numbers(branch)
+    if numbers:
+        print(f"release pull request #{numbers[0]} is open")
+        return
+    body = (
+        f"Release {decision['tag']}.\n\n"
+        "Squash-merge this pull request so the commit subject stays "
+        f"`{decision['commit_subject']}`. That merge starts Release on main. "
+        "The same run pushes the tag and publishes ferroguard to PyPI. "
+        "Do not merge it with the GitHub Actions bot: a GITHUB_TOKEN push "
+        "does not start the workflow.\n"
+    )
+    notes = ROOT / ".git" / f"{decision['tag']}-pr.md"
+    notes.parent.mkdir(parents=True, exist_ok=True)
+    notes.write_text(body, encoding="utf-8")
+    _run(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--base",
+            "main",
+            "--head",
+            branch,
+            "--title",
+            decision["commit_subject"],
+            "--body-file",
+            str(notes),
+        ],
+        dry_run=False,
+    )
+
+
+def _open_release_prs() -> list[tuple[int, str]]:
+    result = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--base",
+            "main",
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,headRefName",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout or "[]")
+    return [(int(item["number"]), str(item["headRefName"])) for item in payload]
+
+
+def _close_older_release_prs(version: str) -> None:
+    """Close older ``release/vX.Y.Z`` pull requests and delete those branches."""
+    current = release_branch(version)
+    for number, head in _open_release_prs():
+        if head not in older_release_heads([head], version):
+            continue
+        _refuse_branch_delete(head)
+        print(f"closing #{number} ({head}); superseded by {current}", flush=True)
+        _run(
+            [
+                "gh",
+                "pr",
+                "close",
+                str(number),
+                "--comment",
+                f"Superseded by {current}.",
+            ],
+            dry_run=False,
+        )
+        deleted = subprocess.run(
+            ["git", "push", "origin", "--delete", head],
             cwd=ROOT,
             check=False,
             capture_output=True,
             text=True,
         )
-        sys.stdout.write(result.stdout)
-        sys.stderr.write(result.stderr)
-        if result.returncode == 0:
-            return
-        if not _push_rejected(result.stderr + result.stdout):
-            raise SystemExit(f"git push origin HEAD:main failed:\n{result.stderr}")
-        print(f"# push rejected ({attempt}), rebuilding on origin/main", flush=True)
-        subprocess.run(["git", "fetch", "origin", "main"], cwd=ROOT, check=True)
-        if _is_this_release("origin/main", version):
-            _checkout("origin/main")
-            return
-        _checkout("origin/main")
-        if not _commit_release(decision):
-            if _is_this_release("HEAD", version):
-                return
-            raise SystemExit("rebuilt release commit was empty")
-    raise SystemExit("git push origin HEAD:main was rejected four times")
+        sys.stdout.write(deleted.stdout)
+        sys.stderr.write(deleted.stderr)
+        if deleted.returncode == 0:
+            continue
+        detail = deleted.stderr + deleted.stdout
+        if "remote ref does not exist" in detail:
+            continue
+        raise SystemExit(f"could not delete {head}:\n{deleted.stderr}")
 
 
 def publish_tag(decision: dict, dry_run: bool) -> None:
@@ -261,8 +419,6 @@ def publish_tag(decision: dict, dry_run: bool) -> None:
     tag = decision["tag"]
     if dry_run:
         for argv in push_commands(decision):
-            if argv == ["git", "push", "origin", "HEAD:main"]:
-                continue
             _run(argv, dry_run=True)
         return
     if not _tag_exists(tag):
@@ -285,35 +441,51 @@ def _store_decision(path: str | None, decision: dict) -> None:
         Path(path).write_text(json.dumps(decision) + "\n", encoding="utf-8")
 
 
-def publish(decision: dict, dry_run: bool, decision_path: str | None = None) -> None:
-    """Bump, commit, push main, then tag that commit."""
+def open_release_pr(decision: dict, dry_run: bool, decision_path: str | None = None) -> None:
+    """Commit the release on a branch and open a pull request. Do not tag."""
     if decision.get("action") != "publish":
-        raise SystemExit(f"refusing to publish action {decision.get('action')}")
+        raise SystemExit(f"refusing to open a pull request for {decision.get('action')}")
     if dry_run:
         print(f"# commit {decision['commit_subject']}")
-        for argv in push_commands(decision):
+        for argv in release_pr_commands(decision):
             _run(argv, dry_run=True)
         return
-    existing = _published_rev(decision)
-    if existing:
-        _checkout(existing)
-    else:
-        # The workflow checkout is the push that started the run. origin/main
-        # may have moved. Classify that tip, then commit the release on it.
-        head = _output(["git", "rev-parse", "HEAD"])
-        origin = _output(["git", "rev-parse", "origin/main"])
-        if head != origin:
-            _checkout(origin)
-        version = VERSION_PATH.read_text(encoding="utf-8")
-        decision = classify_tip(version, "HEAD")
-        _store_decision(decision_path, decision)
-        if decision.get("action") != "publish":
-            print(f"release skipped: {decision.get('reason')}")
-            return
-        if not _commit_release(decision) and not _is_this_release("HEAD", decision["version"]):
-            raise SystemExit("release files were unchanged but HEAD is not the release commit")
-    _push_main(decision)
-    publish_tag(decision, dry_run=False)
+    if _is_this_release("origin/main", decision["version"]):
+        print(f"v{decision['version']} is already on main")
+        return
+    if _release_branch_current(decision):
+        _ensure_pr(decision)
+        _close_older_release_prs(decision["version"])
+        return
+    head = _output(["git", "rev-parse", "HEAD"])
+    origin = _output(["git", "rev-parse", "origin/main"])
+    if head != origin:
+        _checkout(origin)
+    version = VERSION_PATH.read_text(encoding="utf-8")
+    decision = classify_tip(version, "HEAD")
+    _store_decision(decision_path, decision)
+    if decision.get("action") != "publish":
+        print(f"release skipped: {decision.get('reason')}")
+        return
+    if not _commit_release(decision) and not _is_this_release("HEAD", decision["version"]):
+        raise SystemExit("release files were unchanged but HEAD is not the release commit")
+    _push_release_branch(decision)
+    _ensure_pr(decision)
+    _close_older_release_prs(decision["version"])
+
+
+def publish_merged(dry_run: bool) -> None:
+    """Tag the release commit already on HEAD. Do not create another commit."""
+    version = VERSION_PATH.read_text(encoding="utf-8").strip()
+    if not _is_this_release("HEAD", version):
+        raise SystemExit(f"HEAD is not the release commit for {version}")
+    decision = {
+        "action": "publish",
+        "version": version,
+        "tag": f"v{version}",
+        "commit_subject": RELEASE_TITLE.format(version=version),
+    }
+    publish_tag(decision, dry_run=dry_run)
 
 
 def self_test() -> None:
@@ -329,27 +501,57 @@ def self_test() -> None:
     )
     if decision["version"] != "0.3.0":
         raise SystemExit(f"expected v0.3.0, got {decision['version']}")
-    publish(decision, dry_run=True)
+    open_release_pr(decision, dry_run=True)
     if VERSION_PATH.read_text(encoding="utf-8") != version_before:
         raise SystemExit("dry-run changed .version")
     if CHANGELOG_PATH.read_text(encoding="utf-8") != changelog_before:
         raise SystemExit("dry-run changed CHANGELOG.md")
-    commands = push_commands(decision)
-    if ["git", "push", "origin", "HEAD:main"] not in commands:
-        raise SystemExit(f"missing main push: {commands}")
+    commands = release_pr_commands(decision)
+    if ["git", "push", "origin", "HEAD:release/v0.3.0"] not in commands:
+        raise SystemExit(f"missing release branch push: {commands}")
     for argv in commands:
+        if argv[:3] == ["git", "push", "origin"] and argv[-1].endswith(":main"):
+            raise SystemExit(f"dry-run still pushes main: {commands}")
         if "--force" in argv or "-f" in argv:
             raise SystemExit(f"dry-run force-pushes: {argv}")
+    try:
+        _refuse_branch_delete("main")
+    except SystemExit:
+        pass
+    else:
+        raise SystemExit("delete of main was allowed")
+    _refuse_branch_delete("release/v0.1.0")
+    retired = older_release_heads(
+        [
+            "main",
+            "release/v0.1.0",
+            "release/v0.3.0",
+            "cursor/other",
+            "release/v0.3",
+            "release/not-a-version",
+        ],
+        "0.3.0",
+    )
+    if retired != ["release/v0.1.0"]:
+        raise SystemExit(f"older release heads: {retired}")
+    if older_release_heads(["main"], "0.3.0"):
+        raise SystemExit("main was selected for deletion")
     if not _push_rejected("! [rejected] main -> main (non-fast-forward)"):
         raise SystemExit("non-fast-forward was not treated as a retry")
     if _push_rejected("fatal: could not read Username"):
         raise SystemExit("auth failure was treated as a retry")
     try:
-        publish({"action": "skip"}, dry_run=True)
+        open_release_pr({"action": "skip"}, dry_run=True)
     except SystemExit:
         pass
     else:
-        raise SystemExit("publish accepted a skip decision")
+        raise SystemExit("open-pr accepted a skip decision")
+    try:
+        publish_tag({"action": "skip"}, dry_run=True)
+    except SystemExit:
+        pass
+    else:
+        raise SystemExit("publish-tag accepted a skip decision")
     _check_versions_match_after_bump()
     print("release_publish.py self-test ok")
 
@@ -409,7 +611,7 @@ def _check_versions_match_after_bump() -> None:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", nargs="?", choices=("publish",))
+    parser.add_argument("action", nargs="?", choices=("open-pr", "publish-tag"))
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--decision-file")
     parser.add_argument("--dry-run", action="store_true")
@@ -417,11 +619,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         self_test()
         return 0
-    if args.action != "publish":
-        raise SystemExit("pass publish or --self-test")
     os.chdir(ROOT)
-    publish(_read_decision(args.decision_file), args.dry_run, args.decision_file)
-    return 0
+    if args.action == "open-pr":
+        open_release_pr(
+            _read_decision(args.decision_file),
+            dry_run=args.dry_run,
+            decision_path=args.decision_file,
+        )
+        return 0
+    if args.action == "publish-tag":
+        publish_merged(dry_run=args.dry_run)
+        return 0
+    raise SystemExit("pass open-pr, publish-tag, or --self-test")
 
 
 if __name__ == "__main__":
