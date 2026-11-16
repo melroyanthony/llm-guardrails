@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.8](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.8) (2026-11-16)
+
+### CI
+
+* ci(release): publish PyPI from the merged release pull request
+
 ## [0.3.7](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.7) (2026-11-13)
 
 ### CI
