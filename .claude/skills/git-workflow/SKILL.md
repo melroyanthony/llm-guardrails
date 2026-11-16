@@ -28,7 +28,7 @@ Branch from `main` as `feat/issue-N-short-name` or `fix/issue-N-short-name`. Do 
 
 ## Release
 
-A releasable push to `main` publishes in one workflow run. `scripts/release_subject.py` takes the highest bump since the last tag and consumes `## Unreleased`. The job commits `🔖 chore(release): vX.Y.Z`, pushes `main` without force, and tags that commit. The release commit does not publish again. The same run builds the abi3 wheels and sdist from that tag and publishes them to PyPI.
+A releasable push to `main` opens a release pull request. `scripts/release_subject.py` takes the highest bump since the last tag and consumes `## Unreleased`. The job commits `🔖 chore(release): vX.Y.Z` on `release/vX.Y.Z` and does not push `main`. A person squash-merges that pull request. That merge starts the workflow again, which tags the commit in the same run, builds the abi3 wheels and sdist, and publishes them to PyPI with trusted publishing. A tag push does not start that work.
 
 ## Merge
 

@@ -251,7 +251,7 @@ Python dependencies (`pip-audit`). Private reports go through
 
 - 📖 [Docs site](https://melroyanthony.github.io/llm-guardrails/) — install, guards, limits, and the local demo
 - 🛠️ [CONTRIBUTING.md](CONTRIBUTING.md) — setup, tests, lint, and pull requests
-- 🔖 [RELEASING.md](RELEASING.md) — how a push to `main` is versioned, tagged, and published
+- 🔖 [RELEASING.md](RELEASING.md) — how a push to `main` opens a release pull request, and how merging it tags and publishes
 - 🔒 [SECURITY.md](SECURITY.md) — private vulnerability reports
 - 📖 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — Contributor Covenant 2.1
 - 🤖 [AGENTS.md](AGENTS.md) — conventions for contributors and coding agents
