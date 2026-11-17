@@ -380,3 +380,30 @@ mod tests {
         assert!(rules.contains(&"reveal_system_prompt".to_string()));
     }
 }
+
+#[cfg(test)]
+mod properties {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn short_text() -> impl Strategy<Value = String> {
+        prop::collection::vec(any::<char>(), 0..=24).prop_map(|chars| chars.into_iter().collect())
+    }
+
+    proptest! {
+        #![proptest_config(crate::property_config())]
+
+        #[test]
+        fn score_stays_in_range_and_ignores_zero_width(text in short_text()) {
+            let score = injection_score(&text);
+            prop_assert!((0.0..=1.0).contains(&score));
+            let (again, flagged, _) = injection_analyse(&text, 0.5);
+            prop_assert_eq!(again, score);
+            prop_assert_eq!(flagged, score >= 0.5);
+            let padded = format!("\u{200B}{text}\u{FEFF}");
+            prop_assert_eq!(injection_score(&padded), score);
+            let once = normalise_for_matching(&text);
+            prop_assert_eq!(normalise_for_matching(&once), once);
+        }
+    }
+}

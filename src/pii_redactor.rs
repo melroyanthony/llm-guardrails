@@ -461,3 +461,32 @@ mod tests {
         assert!(error.contains("allow_entities"));
     }
 }
+
+#[cfg(test)]
+mod properties {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn plain_text() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            any::<char>().prop_filter("placeholder marker", |ch| *ch != '<'),
+            0..=24,
+        )
+        .prop_map(|chars| chars.into_iter().collect())
+    }
+
+    proptest! {
+        #![proptest_config(crate::property_config())]
+
+        #[test]
+        fn redact_restores_text_without_placeholder_markers(text in plain_text()) {
+            let (redacted, mapping) = redact_text(&text, None, None);
+            for (placeholder, original) in &mapping {
+                prop_assert!(placeholder.starts_with("<<") && placeholder.ends_with(">>"));
+                prop_assert!(text.contains(original.as_str()));
+                prop_assert!(redacted.contains(placeholder.as_str()));
+            }
+            prop_assert_eq!(pii_restore(&redacted, mapping), text);
+        }
+    }
+}
