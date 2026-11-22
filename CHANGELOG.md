@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.3.8](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.8) (2026-11-22)
+
+### CI
+
+* ci(release): publish PyPI from the merged release pull request
+
+### Tests
+
+* test(eval): measure precision and recall per guard
+
 ## [0.3.7](https://github.com/melroyanthony/llm-guardrails/releases/tag/v0.3.7) (2026-11-13)
 
 ### CI
