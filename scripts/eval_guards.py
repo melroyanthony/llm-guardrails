@@ -20,6 +20,7 @@ from pathlib import Path
 
 from llm_guardrails._core import injection_candidate_score
 from llm_guardrails.bias_scorer import BiasScorer
+from llm_guardrails.guards import GuardRegistry
 from llm_guardrails.injection_detector import InjectionDetector
 from llm_guardrails.output_validator import OutputValidator
 from llm_guardrails.pii_redactor import PIIRedactor
@@ -29,15 +30,8 @@ EVAL_DIR = ROOT / "evals" / "v1"
 CASES_PATH = EVAL_DIR / "cases.jsonl"
 MANIFEST_PATH = EVAL_DIR / "manifest.json"
 
-# Names match the guards GuardRegistry.builtins registers, including the
-# ones added with the registry. Only names that have labelled rows are scored.
-GUARD_NAMES = (
-    "pii",
-    "injection",
-    "output_validation",
-    "bias",
-    "pii_restore",
-)
+# Precision and recall are gated only for guards that have a labelled set.
+# Every name from GuardRegistry.builtins is still in the predictor map.
 GATED_GUARDS = ("injection", "pii")
 
 
@@ -100,13 +94,18 @@ def build_predictors(threshold: float) -> dict[str, Callable[[str], bool] | None
     redactor = PIIRedactor()
     validator = OutputValidator()
     scorer = BiasScorer()
-    return {
+    made: dict[str, Callable[[str], bool] | None] = {
         "pii": lambda text: bool(redactor.redact(text)[1]),
         "injection": lambda text: detector.score(text) >= threshold,
         "output_validation": lambda text: not validator.validate(text).is_valid,
         "bias": lambda text: scorer.score(text).score >= threshold,
         "pii_restore": None,
     }
+    names = GuardRegistry.builtins().names()
+    missing = [name for name in names if name not in made]
+    if missing:
+        raise RuntimeError(f"eval has no predictor for registry guard(s): {missing}")
+    return {name: made[name] for name in names}
 
 
 def _time_group(
@@ -147,8 +146,6 @@ def _subset_metrics(rows: list[dict], predicted: dict[str, bool]) -> dict | None
 
 def score_cases(rows: list[dict], *, threshold: float, repeats: int) -> dict:
     predictors = build_predictors(threshold)
-    if tuple(predictors) != GUARD_NAMES:
-        raise RuntimeError("guard map drifted from GUARD_NAMES")
     by_guard: dict[str, list[dict]] = {}
     for row in rows:
         by_guard.setdefault(row["guard"], []).append(row)
@@ -164,7 +161,7 @@ def score_cases(rows: list[dict], *, threshold: float, repeats: int) -> dict:
         "unlabelled_guards": [],
     }
     predicted_by_id: dict[str, bool] = {}
-    for name in GUARD_NAMES:
+    for name in predictors:
         group = by_guard.get(name, [])
         predict = predictors[name]
         if not group or predict is None:

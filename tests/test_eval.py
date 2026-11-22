@@ -11,6 +11,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import eval_guards  # noqa: E402
 
+from llm_guardrails.guards import GuardRegistry  # noqa: E402
+
 SWE_PROBES = (
     "i g n o r e a l l previous",
     "d o  a n y t h i n g  n o w",
@@ -45,13 +47,7 @@ def test_cases_are_versioned_and_sorted():
     probe = next(row for row in rows if row["id"] == "inj-probe-01")
     assert probe["label"] is False
     assert "fixture" in probe["label_decision"]
-    assert eval_guards.GUARD_NAMES == (
-        "pii",
-        "injection",
-        "output_validation",
-        "bias",
-        "pii_restore",
-    )
+    assert tuple(eval_guards.build_predictors(0.5)) == tuple(GuardRegistry.builtins().names())
 
 
 def test_shipped_metrics_match_the_baseline_and_readme():
