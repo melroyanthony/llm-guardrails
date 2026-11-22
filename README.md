@@ -37,6 +37,31 @@ shows the pipeline. It does not call a model.
   - 🦀 `cargo fmt`, `cargo clippy -D warnings`, and `cargo test`.
   - 🔒 `Security` runs cargo-deny and pip-audit. `CodeQL` analyses Python and Rust
     with `build-mode: none`.
+  - 📊 Python 3.14 scores `evals/v1` and uploads `eval-report.json`. Precision and
+    recall fail that step if they fall more than `0.0001` below `evals/v1/baseline.json`.
+    p50 and p99 are in the job summary and are not a gate.
+
+### Eval
+
+Version 1 in `evals/v1/cases.jsonl` is a labelled set for the injection guard
+(direct and indirect) and the PII guard. The sentences are original. Public
+jailbreak corpora were not copied into the tree.
+
+| Guard | Precision | Recall |
+| --- | ---: | ---: |
+| injection | 1.0000 | 0.8235 |
+| pii | 1.0000 | 1.0000 |
+
+One development-machine run of that set measured injection at p50 6.4 µs and
+p99 21.4 µs, and PII at p50 10.3 µs and p99 137.8 µs. The Python 3.14 job
+summary prints the latencies for that CI run.
+
+A second injection pass matches whitespace-stripped text against
+whitespace-stripped rules. `InjectionDetector` does not use it. On this set
+that pass has precision 0.9412 and recall 0.9412, with 1 extra false positive.
+`i g n o r e a l l previous` stays a miss: stripping spaces still does not
+supply the `instructions` token the rule requires. `d o  a n y t h i n g  n o w`
+and `y o u  a r e  n o w  D A N` are caught only by the unshipped pass.
 
 ## 🚀 How To Use It
 
