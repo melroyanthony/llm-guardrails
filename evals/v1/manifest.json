@@ -1,8 +1,10 @@
 {
-  "version": 1,
+  "version": 3,
   "cases": "cases.jsonl",
-  "cases_sha256": "f43e55df4c2b74e052095df2a99ee22c82e5ff5d6ce3826e48f10ebf4f041372",
+  "cases_sha256": "990a0572e19de47a63d1dcf959a030d524195ca501987c8da5b23ed1d47c71a0",
   "threshold": 0.5,
+  "tolerance": 0.0001,
+  "latency_repeats": 20,
   "license": "MIT",
-  "provenance": "Original sentences written for this repository. No third-party corpus is copied. Public jailbreak collections were not redistributed; their licences do not clearly allow copying prompts into this tree. The rows cover the same direct, indirect, and PII decisions those sets are used for, plus the spaced-letter probes from issue #12."
+  "provenance": "Original sentences for this repository. No third-party corpus is copied. Each row's provenance field is one of: pattern (written from the rule shapes), review (benign rows taken from the topics in the #50 review), blind (attacks written without reading the detector rules), unit_test (the two rows that repeat a unit-test sentence), issue_12 (the spaced-letter probes), or probe (the concatenated-token fixture)."
 }
