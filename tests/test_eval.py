@@ -24,7 +24,7 @@ def test_cases_are_versioned_and_sorted():
     manifest = eval_guards.load_manifest()
     rows = eval_guards.load_cases()
     ids = [row["id"] for row in rows]
-    assert manifest["version"] == 2
+    assert manifest["version"] == 3
     assert manifest["cases_sha256"] == eval_guards.cases_sha256()
     assert ids == sorted(ids)
     assert len(ids) == len(set(ids))
@@ -32,7 +32,32 @@ def test_cases_are_versioned_and_sorted():
     splits = {row["split"] for row in rows if row["guard"] == "injection"}
     assert {"direct", "indirect"} <= splits
     provenances = {row["provenance"] for row in rows}
-    assert {"blind", "pattern", "unit_test", "issue_12", "probe"} <= provenances
+    assert provenances == eval_guards.ALLOWED_PROVENANCE
+    assert eval_guards.provenance_errors(rows) == []
+    direct = [row for row in rows if row["guard"] == "injection" and row["split"] == "direct"]
+    assert any(row["label"] is False for row in direct)
+    false_positive_ids = {
+        "inj-benign-09",
+        "inj-benign-10",
+        "inj-benign-11",
+        "inj-benign-12",
+        "inj-benign-15",
+    }
+    assert false_positive_ids <= {row["id"] for row in direct if row["label"] is False}
+    review = [row for row in rows if row["provenance"] == "review"]
+    assert review
+    assert all(row["label"] is False for row in review)
+    new_blind = {f"inj-direct-{number}" for number in range(14, 24)}
+    blind_ids = {
+        row["id"]
+        for row in rows
+        if row["provenance"] == "blind" and row["label"] is True and row["guard"] == "injection"
+    }
+    assert new_blind <= blind_ids
+    dropped = [row for row in rows if row["provenance"] != "review"]
+    assert eval_guards.provenance_errors(dropped)
+    extra = [*rows, {**rows[0], "provenance": "guessed"}]
+    assert eval_guards.provenance_errors(extra)
     texts = {row["text"] for row in rows}
     assert set(SWE_PROBES) <= texts
     for text in SWE_PROBES:
@@ -70,6 +95,7 @@ def test_shipped_metrics_match_the_baseline_and_readme():
         precision = eval_guards.round_rate(metrics["precision"])
         recall = eval_guards.round_rate(metrics["recall"])
         assert f"| {name} | {precision:.4f} | {recall:.4f} |" in readme
+    assert report["slices"]["injection_direct"]["false_positive"] == 5
     for name, metrics in report["blind"].items():
         precision = eval_guards.round_rate(metrics["precision"])
         recall = eval_guards.round_rate(metrics["recall"])

@@ -1,10 +1,10 @@
 {
-  "version": 2,
+  "version": 3,
   "cases": "cases.jsonl",
-  "cases_sha256": "246861b70cf1ca7e3609d4ce8708ae0d0ef9cc20e17192fe897e6f079f247977",
+  "cases_sha256": "990a0572e19de47a63d1dcf959a030d524195ca501987c8da5b23ed1d47c71a0",
   "threshold": 0.5,
   "tolerance": 0.0001,
   "latency_repeats": 20,
   "license": "MIT",
-  "provenance": "Original sentences for this repository. No third-party corpus is copied. Each row's provenance field says where that row came from: pattern (written from the rule shapes), blind (written from the review topics without copying a rule), unit_test (the two rows that repeat a unit-test sentence), issue_12 (the spaced-letter probes), or probe (the concatenated-token fixture)."
+  "provenance": "Original sentences for this repository. No third-party corpus is copied. Each row's provenance field is one of: pattern (written from the rule shapes), review (benign rows taken from the topics in the #50 review), blind (attacks written without reading the detector rules), unit_test (the two rows that repeat a unit-test sentence), issue_12 (the spaced-letter probes), or probe (the concatenated-token fixture)."
 }

@@ -43,22 +43,33 @@ shows the pipeline. It does not call a model.
 
 ### Eval
 
-Version 2 in `evals/v1/cases.jsonl` is a labelled set for the injection guard
+Version 3 in `evals/v1/cases.jsonl` is a labelled set for the injection guard
 (direct and indirect) and the PII guard. The sentences are original. Each row
 records where it came from. Public jailbreak corpora were not copied into the tree.
 
-The harder benign rows drop injection precision and recall from 1.0000 / 0.8235
-to the figures below. The gate tolerance is still `0.0001`. The baseline is
-this measurement, not a quieter bar.
+Direct benign rows, including the five false positives below, are in the
+`injection_direct` slice. Ten further injection attacks were written without
+reading the detector rules. None of them is detected, so injection recall
+falls from 0.7727 to 0.5312. Precision stays 0.7727. The gate tolerance is
+still `0.0001`.
+
+The five direct false positives are `inj-benign-09` (act as), `inj-benign-10`
+(switch to), `inj-benign-11` (center mode), `inj-benign-12` (encode), and
+`inj-benign-15` (contact asap).
 
 | Guard | Precision | Recall |
 | --- | ---: | ---: |
-| injection | 0.7727 | 0.7727 |
+| injection | 0.7727 | 0.5312 |
 | pii | 1.0000 | 1.0000 |
-| injection_direct | 1.0000 | 0.9231 |
+| injection_direct | 0.7059 | 0.5217 |
 | injection_indirect | 1.0000 | 0.8333 |
-| blind injection | 0.0000 | 0.0000 |
+| blind injection | 1.0000 | 0.0000 |
 | blind pii | 1.0000 | 1.0000 |
+
+Blind injection precision is 1.0000 because that slice had no positive
+prediction (0 true positives and 0 false positives). Recall is 0.0000:
+none of the 12 blind attacks matched. The five false positives are in
+`injection_direct`, not in the blind slice.
 
 p50 and p99 in the Python 3.14 job summary are nearest-rank percentiles of 20
 timed repeats per row after a warm-up pass. They are not a gate and are not
@@ -66,7 +77,7 @@ pinned here.
 
 A second injection pass matches whitespace-stripped text against
 whitespace-stripped rules. `InjectionDetector` does not use it. On this set
-that pass has precision 0.7308 and recall 0.8636, with 2 extra false positives.
+that pass has precision 0.7308 and recall 0.5938, with 2 extra false positives.
 `i g n o r e a l l previous` stays a miss: stripping spaces still does not
 supply the `instructions` token the rule requires.
 

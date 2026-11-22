@@ -34,6 +34,9 @@ MANIFEST_PATH = EVAL_DIR / "manifest.json"
 # Every name from GuardRegistry.builtins is still in the predictor map.
 GATED_GUARDS = ("injection", "pii")
 
+# A row's provenance is one of these values, and the file uses each of them.
+ALLOWED_PROVENANCE = frozenset({"blind", "issue_12", "pattern", "probe", "review", "unit_test"})
+
 
 def load_manifest() -> dict:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
@@ -53,6 +56,18 @@ def load_cases() -> list[dict]:
         row["_line"] = line_number
         rows.append(row)
     return rows
+
+
+def provenance_errors(rows: list[dict]) -> list[str]:
+    """The set of provenance values must equal the allowed set."""
+    found = {row.get("provenance") for row in rows}
+    if found == ALLOWED_PROVENANCE:
+        return []
+    missing = sorted(ALLOWED_PROVENANCE - found)
+    extra = sorted(str(name) for name in found - ALLOWED_PROVENANCE)
+    return [
+        f"provenance must be exactly {sorted(ALLOWED_PROVENANCE)}; missing {missing}; extra {extra}"
+    ]
 
 
 def nearest_rank(samples: list[float], percent: float) -> float:
@@ -314,6 +329,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     rows = load_cases()
+    errors = provenance_errors(rows)
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        return 1
     report = score_cases(rows, threshold=threshold, repeats=repeats)
     report["version"] = version
     report["cases_sha256"] = digest
