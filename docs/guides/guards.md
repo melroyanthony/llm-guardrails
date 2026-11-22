@@ -28,6 +28,12 @@ SSNs whose area is `000`, `666`, or `9xx`, whose group is `00`, or whose serial 
 
 `post.validation.is_valid` and `post.bias.score` describe the reply you passed in. The validator checks a small rule set, including top-level JSON `type` and `required` when you ask it to. It is not a full JSON Schema validator. The bias scorer looks for a few patterns. A score of `0.0` only means those patterns did not fire.
 
+## Your own guard
+
+A pipeline keeps its checks in a `GuardRegistry`. The default registry has `pii`, `injection`, `output_validation`, `bias`, and `pii_restore`. Pass `registry=GuardRegistry()` to start empty, or call `pipeline.register` with a `Guard` subclass. Input guards run in registration order during `pre_process`. A guard that sets `blocks=True` and `passed=False` stops the rest of that call and sets `pre.blocked`.
+
+`stream_output` feeds chunks of a model reply to the output guards, except `pii_restore`. The event `text` is the concatenation so far. When a guard blocks, the iterator stops before it reads the next chunk. Call `post_process` when you want the placeholder map applied to the finished reply.
+
 ```text
 Noted.
 True

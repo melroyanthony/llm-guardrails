@@ -19,18 +19,23 @@ Typical usage::
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from llm_guardrails.bias_scorer import BiasReport, BiasScorer
-from llm_guardrails.injection_detector import InjectionDetector, InjectionResult
-from llm_guardrails.output_validator import (
-    OutputValidator,
-    ValidationResult,
-    ValidationRules,
+from llm_guardrails.bias_scorer import BiasReport
+from llm_guardrails.guards import (
+    Guard,
+    GuardContext,
+    GuardRegistry,
+    GuardResult,
+    GuardStage,
+    empty_injection,
+    empty_validation,
 )
-from llm_guardrails.pii_redactor import PIIRedactor
+from llm_guardrails.injection_detector import InjectionResult
+from llm_guardrails.output_validator import ValidationResult, ValidationRules
 
 # ---------------------------------------------------------------------------
 # Result containers
@@ -64,6 +69,19 @@ class PostProcessResult(BaseModel):
 
     bias: BiasReport
     """Bias-scoring results."""
+
+
+class OutputStreamEvent(BaseModel):
+    """One chunk of model output after the output guards have seen it.
+
+    ``text`` is the concatenation of chunks so far, before PII restoration.
+    ``blocked`` is true when a guard asked to stop the stream.
+    """
+
+    chunk: str
+    text: str
+    blocked: bool
+    results: list[GuardResult] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -104,48 +122,40 @@ class GuardrailsPipeline:
     validation_rules: ValidationRules | None = None
     pii_allow_entities: list[str] | None = None
     pii_deny_entities: list[str] | None = None
-
-    # Guards (lazily initialised for convenience)
-    _pii: PIIRedactor = field(init=False, repr=False)
-    _injection: InjectionDetector = field(default_factory=InjectionDetector, init=False, repr=False)
-    _bias: BiasScorer = field(default_factory=BiasScorer, init=False, repr=False)
-    _validator: OutputValidator = field(default_factory=OutputValidator, init=False, repr=False)
+    registry: GuardRegistry | None = None
 
     def __post_init__(self) -> None:
-        self._pii = PIIRedactor(
-            allow_entities=self.pii_allow_entities,
-            deny_entities=self.pii_deny_entities,
-        )
+        if self.registry is None:
+            self.registry = GuardRegistry.builtins(
+                pii_allow_entities=self.pii_allow_entities,
+                pii_deny_entities=self.pii_deny_entities,
+            )
+
+    def register(self, guard: Guard) -> None:
+        """Add a guard to this pipeline's registry."""
+        assert self.registry is not None
+        self.registry.register(guard)
 
     # ------------------------------------------------------------------
     # Pre-processing (input guardrails)
     # ------------------------------------------------------------------
 
     def pre_process(self, text: str) -> PreProcessResult:
-        """Run input-side guardrails.
+        """Run input-side guards in registry order.
 
-        Steps
-        -----
-        1. PII redaction (if enabled).
-        2. Injection detection (if enabled).
+        Built-in PII redaction runs before injection detection when both
+        are enabled. A later guard can still block a clean injection score.
         """
-        # 1. PII redaction
-        if self.pii_enabled:
-            sanitised, pii_map = self._pii.redact(text)
-        else:
-            sanitised, pii_map = text, {}
-
-        # 2. Injection detection
-        if self.injection_enabled:
-            injection = self._injection.analyse(sanitised, threshold=self.injection_threshold)
-        else:
-            injection = InjectionResult(score=0.0, is_injection=False, matched_rules=[])
-
-        blocked = injection.is_injection
-
+        context = self._context()
+        sanitised, results, blocked = self._run(GuardStage.INPUT, text, context, restore=False)
+        injection = empty_injection()
+        for result in results:
+            found = result.extra.get("injection")
+            if isinstance(found, InjectionResult):
+                injection = found
         return PreProcessResult(
             sanitised_text=sanitised,
-            pii_mapping=pii_map,
+            pii_mapping=dict(context.pii_mapping),
             injection=injection,
             blocked=blocked,
         )
@@ -159,31 +169,88 @@ class GuardrailsPipeline:
         text: str,
         pii_mapping: dict[str, str] | None = None,
     ) -> PostProcessResult:
-        """Run output-side guardrails.
-
-        Steps
-        -----
-        1. Output validation (if enabled).
-        2. Bias scoring (if enabled).
-        3. PII restoration (if enabled and mapping is provided).
-        """
-        # 1. Output validation
-        if self.output_validation_enabled:
-            validation = self._validator.validate(text, self.validation_rules)
-        else:
-            validation = ValidationResult(is_valid=True)
-
-        # 2. Bias scoring
-        bias = self._bias.score(text) if self.bias_enabled else BiasReport(score=0.0, flags=[])
-
-        # 3. PII restoration
-        if self.pii_enabled and pii_mapping:
-            final_text = self._pii.restore(text, pii_mapping)
-        else:
-            final_text = text
-
+        """Run output-side guards, then restore PII when a map is present."""
+        context = self._context(pii_mapping)
+        final_text, results, _blocked = self._run(GuardStage.OUTPUT, text, context, restore=True)
+        validation = empty_validation()
+        bias = BiasReport(score=0.0, flags=[])
+        for result in results:
+            found_validation = result.extra.get("validation")
+            if isinstance(found_validation, ValidationResult):
+                validation = found_validation
+            found_bias = result.extra.get("bias")
+            if isinstance(found_bias, BiasReport):
+                bias = found_bias
         return PostProcessResult(
             final_text=final_text,
             validation=validation,
             bias=bias,
         )
+
+    def stream_output(self, chunks: Iterable[str]) -> Iterator[OutputStreamEvent]:
+        """Check each chunk of model output against the output guards.
+
+        The text is the concatenation so far, before PII restoration.
+        A guard that blocks ends the iterator before the next chunk is read.
+        """
+        parts: list[str] = []
+        for chunk in chunks:
+            parts.append(chunk)
+            text = "".join(parts)
+            _current, results, blocked = self._run(
+                GuardStage.OUTPUT,
+                text,
+                self._context(),
+                restore=False,
+            )
+            yield OutputStreamEvent(
+                chunk=chunk,
+                text=text,
+                blocked=blocked,
+                results=results,
+            )
+            if blocked:
+                return
+
+    def _context(self, pii_mapping: dict[str, str] | None = None) -> GuardContext:
+        return GuardContext(
+            pii_mapping=dict(pii_mapping or {}),
+            injection_threshold=self.injection_threshold,
+            validation_rules=self.validation_rules,
+        )
+
+    def _guard_enabled(self, name: str) -> bool:
+        if name in {"pii", "pii_restore"}:
+            return self.pii_enabled
+        if name == "injection":
+            return self.injection_enabled
+        if name == "bias":
+            return self.bias_enabled
+        if name == "output_validation":
+            return self.output_validation_enabled
+        return True
+
+    def _run(
+        self,
+        stage: GuardStage,
+        text: str,
+        context: GuardContext,
+        *,
+        restore: bool,
+    ) -> tuple[str, list[GuardResult], bool]:
+        assert self.registry is not None
+        current = text
+        results: list[GuardResult] = []
+        blocked = False
+        for guard in self.registry.for_stage(stage):
+            if guard.name == "pii_restore" and not restore:
+                continue
+            if not self._guard_enabled(guard.name):
+                continue
+            result = guard.check(current, context=context)
+            results.append(result)
+            current = result.text
+            if result.blocks and not result.passed:
+                blocked = True
+                break
+        return current, results, blocked
