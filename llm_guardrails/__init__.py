@@ -5,6 +5,7 @@ Python wrappers expose the same API as the original pure-Python version.
 """
 
 from llm_guardrails.bias_scorer import BiasScorer
+from llm_guardrails.guards import Guard, GuardRegistry, GuardResult, GuardStage
 from llm_guardrails.injection_detector import InjectionDetector
 from llm_guardrails.output_validator import OutputValidator
 from llm_guardrails.pii_redactor import PIIRedactor
@@ -16,4 +17,8 @@ __all__ = [
     "BiasScorer",
     "OutputValidator",
     "GuardrailsPipeline",
+    "Guard",
+    "GuardRegistry",
+    "GuardResult",
+    "GuardStage",
 ]
