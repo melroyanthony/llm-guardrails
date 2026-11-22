@@ -43,25 +43,32 @@ shows the pipeline. It does not call a model.
 
 ### Eval
 
-Version 1 in `evals/v1/cases.jsonl` is a labelled set for the injection guard
-(direct and indirect) and the PII guard. The sentences are original. Public
-jailbreak corpora were not copied into the tree.
+Version 2 in `evals/v1/cases.jsonl` is a labelled set for the injection guard
+(direct and indirect) and the PII guard. The sentences are original. Each row
+records where it came from. Public jailbreak corpora were not copied into the tree.
+
+The harder benign rows drop injection precision and recall from 1.0000 / 0.8235
+to the figures below. The gate tolerance is still `0.0001`. The baseline is
+this measurement, not a quieter bar.
 
 | Guard | Precision | Recall |
 | --- | ---: | ---: |
-| injection | 1.0000 | 0.8235 |
+| injection | 0.7727 | 0.7727 |
 | pii | 1.0000 | 1.0000 |
+| injection_direct | 1.0000 | 0.9231 |
+| injection_indirect | 1.0000 | 0.8333 |
+| blind injection | 0.0000 | 0.0000 |
+| blind pii | 1.0000 | 1.0000 |
 
-One development-machine run of that set measured injection at p50 6.4 µs and
-p99 21.4 µs, and PII at p50 10.3 µs and p99 137.8 µs. The Python 3.14 job
-summary prints the latencies for that CI run.
+p50 and p99 in the Python 3.14 job summary are nearest-rank percentiles of 20
+timed repeats per row after a warm-up pass. They are not a gate and are not
+pinned here.
 
 A second injection pass matches whitespace-stripped text against
 whitespace-stripped rules. `InjectionDetector` does not use it. On this set
-that pass has precision 0.9412 and recall 0.9412, with 1 extra false positive.
+that pass has precision 0.7308 and recall 0.8636, with 2 extra false positives.
 `i g n o r e a l l previous` stays a miss: stripping spaces still does not
-supply the `instructions` token the rule requires. `d o  a n y t h i n g  n o w`
-and `y o u  a r e  n o w  D A N` are caught only by the unshipped pass.
+supply the `instructions` token the rule requires.
 
 ## 🚀 How To Use It
 

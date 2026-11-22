@@ -22,32 +22,67 @@ def test_cases_are_versioned_and_sorted():
     manifest = eval_guards.load_manifest()
     rows = eval_guards.load_cases()
     ids = [row["id"] for row in rows]
-    assert manifest["version"] == 1
+    assert manifest["version"] == 2
     assert manifest["cases_sha256"] == eval_guards.cases_sha256()
     assert ids == sorted(ids)
     assert len(ids) == len(set(ids))
     assert {row["guard"] for row in rows} == {"injection", "pii"}
     splits = {row["split"] for row in rows if row["guard"] == "injection"}
     assert {"direct", "indirect"} <= splits
+    provenances = {row["provenance"] for row in rows}
+    assert {"blind", "pattern", "unit_test", "issue_12", "probe"} <= provenances
     texts = {row["text"] for row in rows}
     assert set(SWE_PROBES) <= texts
     for text in SWE_PROBES:
         match = next(row for row in rows if row["text"] == text)
         assert match["label"] is True
+        assert match["provenance"] == "issue_12"
+    unit_tests = [row for row in rows if row["provenance"] == "unit_test"]
+    assert {row["text"] for row in unit_tests} == {
+        "What is the capital of France?",
+        "Order 1234-5678-9012-3456 is ready.",
+    }
+    probe = next(row for row in rows if row["id"] == "inj-probe-01")
+    assert probe["label"] is False
+    assert "fixture" in probe["label_decision"]
+    assert eval_guards.GUARD_NAMES == (
+        "pii",
+        "injection",
+        "output_validation",
+        "bias",
+        "pii_restore",
+    )
 
 
 def test_shipped_metrics_match_the_baseline_and_readme():
-    report = eval_guards.score_cases(eval_guards.load_cases())
+    manifest = eval_guards.load_manifest()
+    report = eval_guards.score_cases(
+        eval_guards.load_cases(),
+        threshold=float(manifest["threshold"]),
+        repeats=int(manifest["latency_repeats"]),
+    )
     baseline = json.loads((eval_guards.EVAL_DIR / "baseline.json").read_text(encoding="utf-8"))
-    assert eval_guards.regression_errors(report, baseline) == []
+    assert eval_guards.regression_errors(report, baseline, float(manifest["tolerance"])) == []
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    for guard in eval_guards.GUARDS:
+    for guard in eval_guards.GATED_GUARDS:
         precision = eval_guards.round_rate(report["guards"][guard]["precision"])
         recall = eval_guards.round_rate(report["guards"][guard]["recall"])
         assert f"| {guard} | {precision:.4f} | {recall:.4f} |" in readme
+        metrics = report["guards"][guard]
+        assert metrics["sample_count"] == metrics["support"] * manifest["latency_repeats"]
+    for name, metrics in report["slices"].items():
+        precision = eval_guards.round_rate(metrics["precision"])
+        recall = eval_guards.round_rate(metrics["recall"])
+        assert f"| {name} | {precision:.4f} | {recall:.4f} |" in readme
+    for name, metrics in report["blind"].items():
+        precision = eval_guards.round_rate(metrics["precision"])
+        recall = eval_guards.round_rate(metrics["recall"])
+        assert f"| blind {name} | {precision:.4f} | {recall:.4f} |" in readme
     candidate = report["candidate"]["injection_stripped"]
     assert candidate["extra_false_positives"] >= 1
-    assert candidate["recall"] > report["guards"]["injection"]["recall"]
+    assert "output_validation" in report["unlabelled_guards"]
+    assert "bias" in report["unlabelled_guards"]
+    assert "pii_restore" in report["unlabelled_guards"]
 
 
 def test_regression_gate_ignores_latency_and_allows_an_improvement():
