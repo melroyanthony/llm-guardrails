@@ -10,6 +10,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pii_redactor::pii_redact, m)?)?;
     m.add_function(wrap_pyfunction!(pii_redactor::pii_restore, m)?)?;
     m.add_function(wrap_pyfunction!(injection_detector::injection_score, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        injection_detector::injection_candidate_score,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(injection_detector::injection_analyse, m)?)?;
     m.add_function(wrap_pyfunction!(
         injection_detector::injection_list_rules,

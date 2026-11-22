@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "cases": "cases.jsonl",
+  "cases_sha256": "f43e55df4c2b74e052095df2a99ee22c82e5ff5d6ce3826e48f10ebf4f041372",
+  "threshold": 0.5,
+  "license": "MIT",
+  "provenance": "Original sentences written for this repository. No third-party corpus is copied. Public jailbreak collections were not redistributed; their licences do not clearly allow copying prompts into this tree. The rows cover the same direct, indirect, and PII decisions those sets are used for, plus the spaced-letter probes from issue #12."
+}
